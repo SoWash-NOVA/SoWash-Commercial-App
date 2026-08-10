@@ -15,6 +15,9 @@ import {
   JobDetailResponse,
   JobScope,
   JobSummary,
+  MaintenanceDetailResponse,
+  MaintenanceResponse,
+  MaintenanceStats,
   PortalStats,
   ProfileResponse,
   SitesResponse,
@@ -154,6 +157,45 @@ export function useJobDetail(scheduleId: number | string | null) {
     const { data } = await api.get<JobDetailResponse>(`customer-portal/${scheduleId}/detail`);
     return data;
   }, [scheduleId]);
+}
+
+/**
+ * Maintenance tasks — a separate work stream from cleaning visits.
+ *
+ * Takes no siteId, and must not be given one: maintenance_schedules has no site
+ * column. See the note on MaintenanceJob in api/types.ts.
+ */
+export function useMaintenance(opts: { status?: string; search?: string; dateRange?: string } = {}) {
+  const { status, search, dateRange } = opts;
+
+  return useAsync<MaintenanceResponse>(async () => {
+    const params: Record<string, string> = {};
+    if (status && status !== 'all') params.status = status;
+    if (search && search.trim()) params.search = search.trim();
+    if (dateRange && dateRange !== 'all') params.dateRange = dateRange;
+
+    const { data } = await api.get<MaintenanceResponse>('customer-portal/maintenance-history', {
+      params,
+    });
+    return data;
+  }, [status, search, dateRange]);
+}
+
+export function useMaintenanceStats() {
+  return useAsync<MaintenanceStats>(async () => {
+    const { data } = await api.get<MaintenanceStats>('customer-portal/maintenance-stats');
+    return data;
+  }, []);
+}
+
+export function useMaintenanceDetail(id: number | string | null) {
+  return useAsync<MaintenanceDetailResponse | null>(async () => {
+    if (!id) return null;
+    const { data } = await api.get<MaintenanceDetailResponse>(
+      `customer-portal/maintenance/${id}/detail`,
+    );
+    return data;
+  }, [id]);
 }
 
 // ────────────────────────────── derived ──────────────────────────────

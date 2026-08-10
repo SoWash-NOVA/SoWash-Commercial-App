@@ -16,15 +16,21 @@ import {
   Alert,
   StyleSheet,
 } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Linking } from 'react-native';
 import {
   Building2,
   CalendarDays,
+  ChevronRight,
   CreditCard,
   Hash,
   LogOut,
   Mail,
   Phone,
+  ShieldCheck,
+  Trash2,
   User,
+  Wrench,
   Zap,
 } from 'lucide-react-native';
 import { styles, palette } from '../../src/theme';
@@ -32,11 +38,13 @@ import { useAccent } from '../../src/theme-context';
 import { useAuth, initialsOf } from '../../src/auth/AuthContext';
 import { useClient, formatDateOnly, formatSystemSize } from '../../src/hooks';
 import { useSiteContext } from '../../src/site-context';
+import { PRIVACY_EMAIL } from '../../src/contact';
 
 /** Accent options, matching the residential app's picker. Teal leads here. */
 const ACCENTS = ['#0F766E', '#2E6BFF', '#7C3AED', '#B45309', '#BE123C'];
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const { accent, setAccent } = useAccent();
   const { user, clientName, signOut } = useAuth();
   const { sites } = useSiteContext();
@@ -49,6 +57,40 @@ export default function ProfileScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Sign out', style: 'destructive', onPress: () => void signOut() },
     ]);
+  };
+
+  /**
+   * Play requires an in-app route to account deletion for any app with
+   * accounts. There is no self-service delete endpoint, and there should not
+   * be: these logins belong to an organisation under contract, and letting one
+   * employee delete the account would take the whole company's access with it.
+   * So this opens a prefilled request to support.
+   *
+   * Worded as "close my account" rather than "delete", because that is what
+   * actually happens — the organisation's service records survive under the
+   * contract, and the policy screen says so.
+   */
+  const requestClosure = () => {
+    Alert.alert(
+      'Close my account',
+      'This sends a request to close your personal login. Your organisation’s service records are kept under your contract. Requests are actioned within 30 days.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          onPress: () => {
+            const who = user?.email || 'unknown';
+            const subject = encodeURIComponent(`Account closure request — ${who}`);
+            const body = encodeURIComponent(
+              `Please close my SoWash Commercial login.\n\n` +
+                `Email: ${who}\n` +
+                `Client: ${clientName || c?.client_name || ''} (id ${user?.client_id ?? '—'})\n`,
+            );
+            void Linking.openURL(`mailto:${PRIVACY_EMAIL}?subject=${subject}&body=${body}`);
+          },
+        },
+      ],
+    );
   };
 
   if (loading && !data) {
@@ -156,6 +198,27 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* ── More. Play checks that privacy and account closure are both
+            reachable in-app, so they live here rather than in a web link. ── */}
+        <View style={[styles.card, { marginTop: 16, paddingVertical: 4 }]}>
+          <LinkRow
+            icon={<Wrench size={16} color={palette.muted} />}
+            label="Maintenance history"
+            onPress={() => router.push('/maintenance')}
+          />
+          <LinkRow
+            icon={<ShieldCheck size={16} color={palette.muted} />}
+            label="Privacy policy"
+            onPress={() => router.push('/privacy')}
+          />
+          <LinkRow
+            icon={<Trash2 size={16} color={palette.muted} />}
+            label="Close my account"
+            onPress={requestClosure}
+            last
+          />
+        </View>
+
         <TouchableOpacity onPress={confirmSignOut} style={[styles.btnOutline, { marginTop: 24 }]}>
           <LogOut size={16} color={palette.danger} />
           <Text style={[styles.btnOutlineText, { color: palette.danger }]}>Sign out</Text>
@@ -188,7 +251,36 @@ function Row({
   );
 }
 
+function LinkRow({
+  icon,
+  label,
+  onPress,
+  last,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onPress: () => void;
+  last?: boolean;
+}) {
+  return (
+    <TouchableOpacity onPress={onPress} style={[local.linkRow, last && { borderBottomWidth: 0 }]}>
+      <View style={local.rowIcon}>{icon}</View>
+      <Text style={local.linkLabel}>{label}</Text>
+      <ChevronRight size={16} color={palette.mutedLight} />
+    </TouchableOpacity>
+  );
+}
+
 const local = StyleSheet.create({
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.borderSubtle,
+  },
+  linkLabel: { flex: 1, fontSize: 14, fontWeight: '700', color: palette.ink },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

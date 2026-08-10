@@ -19,7 +19,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowRight, CalendarCheck, CircleAlert, Inbox } from 'lucide-react-native';
+import { ArrowRight, CalendarCheck, CircleAlert, Inbox, Wrench } from 'lucide-react-native';
 import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useAuth } from '../../src/auth/AuthContext';
@@ -125,6 +125,19 @@ export default function OverviewScreen() {
             <Kpi label="BOOKED" value={stats.data?.scheduled} color={accent} last />
           </View>
         )}
+
+        {/* Maintenance lives on its own table with no site column, so it is a
+            separate destination rather than another filter on this screen. */}
+        <TouchableOpacity onPress={() => router.push('/maintenance')} style={local.linkTile}>
+          <View style={[local.linkIcon, { backgroundColor: `${accent}18` }]}>
+            <Wrench size={17} color={accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={local.linkTitle}>Maintenance</Text>
+            <Text style={local.linkSub}>Contract tasks and checklists</Text>
+          </View>
+          <ArrowRight size={16} color={palette.mutedLight} />
+        </TouchableOpacity>
 
         {/* ── Recent ─────────────────────────────────────────────────── */}
         <View style={local.sectionRow}>
@@ -251,6 +264,26 @@ const local = StyleSheet.create({
   },
   emptyTitle: { fontSize: 14, fontWeight: '800', color: palette.ink, marginTop: 2 },
   emptyBody: { fontSize: 12.5, lineHeight: 18, color: palette.mutedLight, textAlign: 'center' },
+  linkTile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: palette.surface,
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: 20,
+    padding: 14,
+    marginTop: 12,
+  },
+  linkIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  linkTitle: { fontSize: 14.5, fontWeight: '800', color: palette.ink },
+  linkSub: { fontSize: 12, fontWeight: '600', color: palette.mutedLight, marginTop: 2 },
   skeleton: {
     height: 96,
     borderRadius: 20,

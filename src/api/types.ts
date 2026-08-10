@@ -174,3 +174,76 @@ export interface JobDetailResponse {
   success: boolean;
   job: JobDetail;
 }
+
+/* ── maintenance ─────────────────────────────────────────────────────────
+ *
+ * A separate work stream from cleaning visits, on its own table.
+ *
+ * ⚠ maintenance_schedules has NO site column — it is scoped to the CLIENT and
+ * a task template, nothing else. The endpoints still return site_name/address,
+ * but they come from
+ *
+ *     LEFT JOIN LATERAL (SELECT * FROM commercial_sites
+ *                        WHERE client_id = ms.client_id
+ *                        ORDER BY site_name ASC LIMIT 1)
+ *
+ * which is "the client's alphabetically first site", not the site the work
+ * happened at. For a multi-site client every row carries the SAME wrong
+ * address. Those fields are deliberately omitted from this interface so no
+ * screen can render them by accident, and maintenance is never filtered by the
+ * site switcher — there is nothing to filter on.
+ *
+ * Photos here are singular text columns (before_photo_url), not the JSON
+ * arrays site_schedules uses. Different shape, same photoUrl() treatment.
+ */
+export interface MaintenanceJob {
+  id: number;
+  client_id: number;
+  task_template_id: number | null;
+  team_id: number | null;
+  scheduled_date: string | null;
+  service_number: number | null;
+  /** CHECK-constrained: scheduled | in_progress | completed | cancelled. */
+  status: string | null;
+  completed: boolean | null;
+  completed_at: string | null;
+  started_at: string | null;
+  before_photo_url: string | null;
+  before_photo_at: string | null;
+  after_photo_url: string | null;
+  after_photo_at: string | null;
+  remarks: string | null;
+  created_at: string | null;
+  client_name: string | null;
+  team_lead_name: string | null;
+  /** maintenance_task_templates.task_name */
+  task_name: string | null;
+  /** maintenance_task_templates.check_points — the checklist for this task. */
+  task_description: string | null;
+}
+
+export interface MaintenanceResponse {
+  success: boolean;
+  jobs: MaintenanceJob[];
+  count: number;
+}
+
+export interface MaintenanceStats {
+  success: boolean;
+  total: number;
+  completed: number;
+  inProgress: number;
+  scheduled: number;
+}
+
+export interface MaintenanceDetailResponse {
+  success: boolean;
+  job: MaintenanceJob & {
+    completed_by: number | null;
+    started_by: number | null;
+    updated_at: string | null;
+    contact_person: string | null;
+    contact_number: string | null;
+    email: string | null;
+  };
+}
