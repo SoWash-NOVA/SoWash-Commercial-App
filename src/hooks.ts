@@ -21,6 +21,7 @@ import {
   PortalStats,
   ProfileResponse,
   SitesResponse,
+  SldWalkthroughResponse,
 } from './api/types';
 
 interface AsyncState<T> {
@@ -160,6 +161,27 @@ export function useJobDetail(scheduleId: number | string | null) {
 }
 
 /**
+ * The SLD walkthrough for one visit: the site diagram, its pins, and the
+ * before/after photo captured at each pin during THIS visit.
+ *
+ * Fetched by the detail screen as well as the walkthrough screen, because
+ * /:schedule_id/detail does not carry has_sld_walkthrough — only /history
+ * computes that flag (see the Omit on JobDetail in api/types.ts). Rather than
+ * add a backend field and a deploy, the detail screen asks for the real thing
+ * and decides with sldHasWalk(). It is a small payload and only one request.
+ *
+ * A site with no diagram is a normal answer, not an error: the endpoint returns
+ * { hasDiagram: false, points: [] } and the caller falls back to the flat grid.
+ */
+export function useSldWalkthrough(scheduleId: number | string | null) {
+  return useAsync<SldWalkthroughResponse | null>(async () => {
+    if (!scheduleId) return null;
+    const { data } = await api.get<SldWalkthroughResponse>(`customer-portal/sld/${scheduleId}`);
+    return data;
+  }, [scheduleId]);
+}
+
+/**
  * Maintenance tasks — a separate work stream from cleaning visits.
  *
  * Takes no siteId, and must not be given one: maintenance_schedules has no site
@@ -215,6 +237,24 @@ export function useSplitJobs(jobs: JobSummary[] | undefined) {
     const upcoming = list.filter((j) => isScheduled(j.status));
     return { done, active, upcoming };
   }, [jobs]);
+}
+
+/**
+ * Is there actually a walkthrough to show for this visit?
+ *
+ * Mirrors the EXISTS behind has_sld_walkthrough in /history: a diagram must
+ * exist AND at least one of its pins must carry a before or after photo from
+ * this schedule. A diagram with no photos is not a walkthrough — it is an empty
+ * map, and offering to "walk" it would be a dead end.
+ *
+ * This is also what absorbs the re-uploaded-diagram edge case. The endpoint
+ * always returns the site's LATEST diagram; if it was replaced after this visit
+ * the new pin ids match none of the visit's photos, every url comes back null,
+ * and this correctly reports false so the flat grid ships instead.
+ */
+export function sldHasWalk(sld: SldWalkthroughResponse | null | undefined): boolean {
+  if (!sld?.hasDiagram || !sld.diagram?.diagram_url) return false;
+  return (sld.points ?? []).some((p) => Boolean(p.before_url || p.after_url));
 }
 
 // ────────────────────────────── status ──────────────────────────────
