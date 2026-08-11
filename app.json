@@ -17,6 +17,7 @@
     },
     "android": {
       "package": "com.sowash.commercial",
+      "googleServicesFile": "./google-services.json",
       "predictiveBackGestureEnabled": false,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
