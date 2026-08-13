@@ -50,10 +50,39 @@ const DENSITIES = [
   ['xxxhdpi', 96],
 ];
 
-/** Point FCM at our drawable + colour. */
+/**
+ * Point FCM at our drawable + colour.
+ *
+ * ⚠ tools:replace IS LOAD-BEARING — without it the Android build fails.
+ *
+ * @react-native-firebase/messaging ships its own AndroidManifest declaring
+ * BOTH of these same meta-data keys. Two manifests setting one attribute is a
+ * merger conflict, and Gradle stops with:
+ *
+ *   Attribute meta-data#com.google.firebase.messaging.default_notification_color
+ *   @resource value=(...) is also present at [:react-native-firebase_messaging]
+ *   Suggestion: add 'tools:replace="android:resource"' to override.
+ *
+ * This plugin predates the dependency — it was written on 2026-08-10, when
+ * nothing else in the project declared these, and Phase 5 added RNFirebase
+ * underneath it. Ours must win: the library's entry points at resources that
+ * only exist when you configure them through firebase.json, which this project
+ * does not use. We generate the drawable and the colour ourselves below.
+ *
+ * xmlns:tools is added defensively. The Expo template usually declares it, but
+ * a manifest without it turns tools:replace into an unrecognised attribute and
+ * the merge failure comes back wearing a different hat.
+ */
 const withMetaData = (config) =>
   withAndroidManifest(config, (cfg) => {
-    const app = AndroidConfig.Manifest.getMainApplicationOrThrow(cfg.modResults);
+    const manifest = cfg.modResults;
+
+    manifest.manifest.$ = manifest.manifest.$ || {};
+    if (!manifest.manifest.$['xmlns:tools']) {
+      manifest.manifest.$['xmlns:tools'] = 'http://schemas.android.com/tools';
+    }
+
+    const app = AndroidConfig.Manifest.getMainApplicationOrThrow(manifest);
     AndroidConfig.Manifest.addMetaDataItemToMainApplication(
       app,
       META_ICON,
@@ -66,6 +95,16 @@ const withMetaData = (config) =>
       `@color/${COLOR_RESOURCE}`,
       'resource',
     );
+
+    // addMetaDataItemToMainApplication has no way to pass extra attributes, so
+    // the nodes are amended after the fact.
+    for (const item of app['meta-data'] || []) {
+      const name = item?.$?.['android:name'];
+      if (name === META_ICON || name === META_COLOR) {
+        item.$['tools:replace'] = 'android:resource';
+      }
+    }
+
     return cfg;
   });
 
