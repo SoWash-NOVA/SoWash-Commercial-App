@@ -10,13 +10,17 @@
 
 import React from 'react';
 import { Tabs } from 'expo-router';
-import { Building2, ClipboardList, LayoutGrid, User } from 'lucide-react-native';
+import { Building2, ClipboardList, LayoutGrid, MessagesSquare, User } from 'lucide-react-native';
 import { palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { SiteProvider } from '../../src/site-context';
+import { useChatUnread } from '../../src/hooks';
 
 export default function TabsLayout() {
   const { accent } = useAccent();
+  // Lives here rather than inside the Support screen so the badge is visible
+  // from anywhere in the app, which is the only reason a badge is worth having.
+  const { unread } = useChatUnread();
 
   return (
     <SiteProvider>
@@ -55,6 +59,17 @@ export default function TabsLayout() {
           options={{
             title: 'Sites',
             tabBarIcon: ({ color, size }) => <Building2 size={size - 2} color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="support"
+          options={{
+            title: 'Support',
+            tabBarIcon: ({ color, size }) => <MessagesSquare size={size - 2} color={color} />,
+            // A count, not a dot: unlike the bell, "3 people are waiting on a
+            // reply" is a materially different message from "1".
+            tabBarBadge: unread > 0 ? unread : undefined,
+            tabBarBadgeStyle: { backgroundColor: accent, fontSize: 10 },
           }}
         />
         <Tabs.Screen

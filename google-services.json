@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "566792530039",
+    "project_id": "sowash-firebase-project",
+    "storage_bucket": "sowash-firebase-project.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:566792530039:android:cb6b25693e93b6deebbe72",
+        "android_client_info": {
+          "package_name": "com.sowash.commercial"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCgoCxbYKs5vKbZnqt-COZqRIvlwOMOVMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:566792530039:android:9a045afb08d98326ebbe72",
+        "android_client_info": {
+          "package_name": "com.sowash.customer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCgoCxbYKs5vKbZnqt-COZqRIvlwOMOVMA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

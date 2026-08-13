@@ -1,7 +1,7 @@
 // app/_layout.tsx
 //
-// Root layout. Mirrors sowash-customer-app's, minus initPush() — push needs
-// Firebase, which arrives in Phase 5. The effect slots in below the redirect.
+// Root layout. Mirrors sowash-customer-app's, including initPush() — added in
+// Phase 5, in the slot this comment used to reserve for it.
 
 import React, { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
@@ -10,6 +10,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { ThemeProvider } from '../src/theme-context';
 import { AuthProvider, useAuth } from '../src/auth/AuthContext';
+import { initPush } from '../src/push';
 import { palette, ACCENT_DEFAULT } from '../src/theme';
 
 /**
@@ -37,6 +38,30 @@ function RootNavigator() {
       router.replace('/');
     }
   }, [status, segments, router]);
+
+  // Push registration runs only once signed in: handing the token to the
+  // backend needs the JWT, which the axios interceptor attaches only after
+  // login. initPush() never throws and returns a no-op teardown when push is
+  // unavailable (web preview, no dev build, permission denied), so nothing
+  // here needs a try/catch.
+  useEffect(() => {
+    if (status !== 'signedIn') return;
+
+    let teardown: (() => void) | undefined;
+    let cancelled = false;
+
+    initPush().then((off) => {
+      // Signing out while permission was still being requested would otherwise
+      // leave the listeners attached with no way to reach them.
+      if (cancelled) off();
+      else teardown = off;
+    });
+
+    return () => {
+      cancelled = true;
+      teardown?.();
+    };
+  }, [status]);
 
   if (status === 'loading') {
     return (

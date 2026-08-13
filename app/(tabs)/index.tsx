@@ -19,12 +19,12 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowRight, CalendarCheck, CircleAlert, Inbox, Wrench } from 'lucide-react-native';
+import { ArrowRight, Bell, CalendarCheck, CircleAlert, Inbox, Wrench } from 'lucide-react-native';
 import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useAuth } from '../../src/auth/AuthContext';
 import { useSiteContext } from '../../src/site-context';
-import { useJobs, useStats, formatDateOnly, relativeDay } from '../../src/hooks';
+import { useJobs, useStats, useUnreadCount, formatDateOnly, relativeDay } from '../../src/hooks';
 import { SiteSwitcher } from '../../src/components/SiteSwitcher';
 import { JobCard } from '../../src/components/JobCard';
 
@@ -37,6 +37,7 @@ export default function OverviewScreen() {
   const stats = useStats();
   const upcoming = useJobs({ scope: 'upcoming', siteId: selectedSiteId, limit: 5 });
   const past = useJobs({ scope: 'past', siteId: selectedSiteId, limit: 5 });
+  const { unread } = useUnreadCount();
 
   const refreshing = stats.refreshing || upcoming.refreshing || past.refreshing;
   const onRefresh = async () => {
@@ -64,12 +65,32 @@ export default function OverviewScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accent} />
         }
       >
-        <Text style={local.greeting}>
-          {user?.firstName ? `Hello, ${user.firstName}` : 'Welcome back'}
-        </Text>
-        <Text style={local.client} numberOfLines={2}>
-          {clientName || 'Your account'}
-        </Text>
+        <View style={local.headerRow}>
+          <View style={local.headerText}>
+            <Text style={local.greeting}>
+              {user?.firstName ? `Hello, ${user.firstName}` : 'Welcome back'}
+            </Text>
+            <Text style={local.client} numberOfLines={2}>
+              {clientName || 'Your account'}
+            </Text>
+          </View>
+
+          {/* The badge is a plain dot, not a count. Two notifications per
+              visit means a number would read "1" almost always, and a dot
+              survives the case where the poll is stale. */}
+          <TouchableOpacity
+            onPress={() => router.push('/notifications')}
+            style={styles.bellBtn}
+            accessibilityLabel={
+              unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'
+            }
+          >
+            <Bell size={19} color={palette.inkSoft} />
+            {unread > 0 ? (
+              <View style={[styles.bellBadge, { backgroundColor: accent }]} />
+            ) : null}
+          </TouchableOpacity>
+        </View>
 
         <View style={{ marginTop: 14, marginBottom: 18 }}>
           <SiteSwitcher />
@@ -214,6 +235,8 @@ function SkeletonCard() {
 
 const local = StyleSheet.create({
   centre: { alignItems: 'center', justifyContent: 'center' },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  headerText: { flex: 1 },
   greeting: { fontSize: 13, fontWeight: '700', color: palette.mutedLight },
   client: { fontSize: 24, fontWeight: '900', color: palette.ink, marginTop: 2 },
   section: {

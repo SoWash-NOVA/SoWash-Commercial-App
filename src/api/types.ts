@@ -121,7 +121,12 @@ export interface JobSummary {
   after_photos: string | null;
   notes: string | null;
   team_lead_name: string | null;
-  /** Whether Phase 4's SLD walkthrough has anything to show for this job. */
+  /**
+   * Whether the SLD walkthrough has anything to show for this job.
+   *
+   * ⚠ This is computed by an EXISTS in /history ONLY. It is NOT in the SELECT
+   * list of /:schedule_id/detail — see the Omit on JobDetail below.
+   */
   has_sld_walkthrough: boolean;
 }
 
@@ -141,8 +146,15 @@ export type JobScope = 'all' | 'past' | 'upcoming';
  *
  * Everything in JobSummary plus the field service report. Note the endpoint
  * only returns approved jobs, or one scheduled for today.
+ *
+ * ⚠ has_sld_walkthrough is Omit-ted deliberately. The flag exists only in
+ * /history's SELECT; /detail never computes it, so on this shape it would
+ * always be `undefined` — and `undefined` reads as "no walkthrough", silently
+ * hiding the feature on the one screen that launches it. Omitting it turns
+ * that into a compile error instead. The detail screen asks /sld/:schedule_id
+ * directly (useSldWalkthrough) and decides from the real data.
  */
-export interface JobDetail extends JobSummary {
+export interface JobDetail extends Omit<JobSummary, 'has_sld_walkthrough'> {
   email: string | null;
   installation_status: string | null;
   approved_at: string | null;
@@ -173,6 +185,58 @@ export interface JobDetail extends JobSummary {
 export interface JobDetailResponse {
   success: boolean;
   job: JobDetail;
+}
+
+/* ── SLD walkthrough ─────────────────────────────────────────────────────
+ *
+ * GET /customer-portal/sld/:schedule_id → the site's single-line diagram, its
+ * pins, and the before/after photos captured at each pin during THIS visit.
+ * Scoped to the caller's client_id by the endpoint.
+ *
+ * The endpoint picks the site's LATEST diagram. If a site's diagram was
+ * re-uploaded, the point ids changed, so an older visit's photos no longer
+ * match any pin and every before_url/after_url comes back null. That is a
+ * known, accepted edge case — the schema has no schedule→diagram link — and
+ * the app must treat it as "no walkthrough" and fall back to the flat grid.
+ */
+export interface SldDiagram {
+  id: number;
+  /** Stored path — run through photoUrl(), never concatenated by hand. */
+  diagram_url: string | null;
+  title: string | null;
+}
+
+export interface SldPoint {
+  id: number;
+  /** 1-based position, assigned by the endpoint over order_index NULLS LAST. */
+  index: number;
+  label: string | null;
+  /**
+   * Pin position as a percentage of the diagram's own width/height.
+   *
+   * ⚠ Typed loosely on purpose. commercial_sld_points is not in
+   * docs/db/main_schema.sql (that dump is behind), and the insert in
+   * routes/commercial-sld/diagrams.js passes req.body straight through with no
+   * cast — so the column may well be `numeric`, which node-postgres hands back
+   * as a STRING. The web viewer never noticed because it interpolates straight
+   * into a CSS `%`. React Native needs a real number for layout, so callers
+   * must coerce. Use pointXY() in the walkthrough component.
+   */
+  x_percent: number | string | null;
+  y_percent: number | string | null;
+  order_index: number | null;
+  /** Latest 'before' photo at this pin for this schedule, if any. */
+  before_url: string | null;
+  /** Latest 'after' photo at this pin for this schedule, if any. */
+  after_url: string | null;
+}
+
+export interface SldWalkthroughResponse {
+  success: boolean;
+  /** False when the site has no diagram at all — diagram is null, points []. */
+  hasDiagram: boolean;
+  diagram: SldDiagram | null;
+  points: SldPoint[];
 }
 
 /* ── maintenance ─────────────────────────────────────────────────────────
@@ -246,4 +310,101 @@ export interface MaintenanceDetailResponse {
     contact_number: string | null;
     email: string | null;
   };
+}
+
+// ─────────────────────────── notifications ───────────────────────────
+//
+// Written by sowash-backend/services/commercialNotifications.js, read through
+// /api/customer-portal/notifications. Backed by the commercial_notifications
+// table (migration 2026-08-13).
+
+/**
+ * The two events a commercial customer is told about.
+ *
+ * Kept as a union rather than a bare string so adding a type without also
+ * teaching notificationTarget() where it should navigate is a compile error.
+ * It mirrors the CHECK constraint on commercial_notifications.type exactly.
+ *
+ * There is deliberately no 'visit_completed'. The portal hides completed
+ * visits until CI admin approves them, so approval is the first moment one
+ * exists for the customer — see the migration header.
+ *
+ * 'chat_reply' was added in Phase 6. Those rows carry thread_id instead of
+ * schedule_id and route to the Support tab rather than to a visit.
+ */
+export type NotificationType = 'crew_started' | 'visit_approved' | 'chat_reply';
+
+export interface AppNotification {
+  id: number;
+  type: NotificationType;
+  title: string;
+  body: string | null;
+  /** site_schedules.id. Null only if the visit was deleted after the fact. */
+  schedule_id: number | null;
+  /** commercial_chat_threads.id. Set on chat_reply, null on visit events. */
+  thread_id: number | null;
+  /** Null means unread. A timestamp, not a boolean — see the migration. */
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface NotificationsResponse {
+  success: boolean;
+  notifications: AppNotification[];
+  unread: number;
+  hasMore: boolean;
+}
+
+export interface UnreadResponse {
+  success: boolean;
+  unread: number;
+}
+
+// ─────────────────────────────── chat ───────────────────────────────
+//
+// One thread per CLIENT: every site manager on the account shares the
+// conversation, and each message records who sent it. Backed by
+// commercial_chat_* (migration 2026-08-13_commercial_chat.sql), read and
+// written through /api/customer-portal/chat.
+
+export type ChatSenderKind = 'customer' | 'agent' | 'system';
+
+/** The optional "about this visit" tag on a message. */
+export interface ChatVisitTag {
+  id: number;
+  site_name: string | null;
+  scheduled_date: string | null;
+  status: string | null;
+}
+
+export interface ChatMessage {
+  id: number;
+  sender_kind: ChatSenderKind;
+  body: string | null;
+  /** Server path like "/uploads/commercial-chat/…". Needs SERVER_BASE. */
+  attachment_url: string | null;
+  attachment_name: string | null;
+  created_at: string;
+  /** Staff name on an agent message; the sender's name on a customer one. */
+  sender_name: string | null;
+  visit: ChatVisitTag | null;
+}
+
+export interface ChatThread {
+  id: number;
+  status: string;
+  last_message_at: string | null;
+}
+
+export interface ChatResponse {
+  success: boolean;
+  thread: ChatThread;
+  messages: ChatMessage[];
+  unread: number;
+}
+
+export interface ChatDeltaResponse {
+  success: boolean;
+  messages: ChatMessage[];
+  count: number;
 }

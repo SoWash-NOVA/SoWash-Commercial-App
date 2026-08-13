@@ -9,6 +9,8 @@
 // screen does not justify a cache layer.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import api, { errorMessage } from './api/client';
 import {
   HistoryResponse,
@@ -21,6 +23,14 @@ import {
   PortalStats,
   ProfileResponse,
   SitesResponse,
+  ChatDeltaResponse,
+  ChatMessage,
+  ChatResponse,
+  ChatThread,
+  NotificationsResponse,
+  NotificationType,
+  SldWalkthroughResponse,
+  UnreadResponse,
 } from './api/types';
 
 interface AsyncState<T> {
@@ -160,6 +170,27 @@ export function useJobDetail(scheduleId: number | string | null) {
 }
 
 /**
+ * The SLD walkthrough for one visit: the site diagram, its pins, and the
+ * before/after photo captured at each pin during THIS visit.
+ *
+ * Fetched by the detail screen as well as the walkthrough screen, because
+ * /:schedule_id/detail does not carry has_sld_walkthrough — only /history
+ * computes that flag (see the Omit on JobDetail in api/types.ts). Rather than
+ * add a backend field and a deploy, the detail screen asks for the real thing
+ * and decides with sldHasWalk(). It is a small payload and only one request.
+ *
+ * A site with no diagram is a normal answer, not an error: the endpoint returns
+ * { hasDiagram: false, points: [] } and the caller falls back to the flat grid.
+ */
+export function useSldWalkthrough(scheduleId: number | string | null) {
+  return useAsync<SldWalkthroughResponse | null>(async () => {
+    if (!scheduleId) return null;
+    const { data } = await api.get<SldWalkthroughResponse>(`customer-portal/sld/${scheduleId}`);
+    return data;
+  }, [scheduleId]);
+}
+
+/**
  * Maintenance tasks — a separate work stream from cleaning visits.
  *
  * Takes no siteId, and must not be given one: maintenance_schedules has no site
@@ -215,6 +246,24 @@ export function useSplitJobs(jobs: JobSummary[] | undefined) {
     const upcoming = list.filter((j) => isScheduled(j.status));
     return { done, active, upcoming };
   }, [jobs]);
+}
+
+/**
+ * Is there actually a walkthrough to show for this visit?
+ *
+ * Mirrors the EXISTS behind has_sld_walkthrough in /history: a diagram must
+ * exist AND at least one of its pins must carry a before or after photo from
+ * this schedule. A diagram with no photos is not a walkthrough — it is an empty
+ * map, and offering to "walk" it would be a dead end.
+ *
+ * This is also what absorbs the re-uploaded-diagram edge case. The endpoint
+ * always returns the site's LATEST diagram; if it was replaced after this visit
+ * the new pin ids match none of the visit's photos, every url comes back null,
+ * and this correctly reports false so the flat grid ships instead.
+ */
+export function sldHasWalk(sld: SldWalkthroughResponse | null | undefined): boolean {
+  if (!sld?.hasDiagram || !sld.diagram?.diagram_url) return false;
+  return (sld.points ?? []).some((p) => Boolean(p.before_url || p.after_url));
 }
 
 // ────────────────────────────── status ──────────────────────────────
@@ -347,4 +396,377 @@ export function formatSystemSize(value: string | number | null | undefined): str
   }
   const s = String(value).trim();
   return /^[\d.,]+$/.test(s) ? `${s} kW` : s;
+}
+
+// ────────────────────────────── notifications ──────────────────────────────
+//
+// Feed + badge for the bell on Overview. Rows come from
+// commercial_notifications, written by the backend on two events only: the
+// crew starting work, and CI admin approving a finished visit.
+
+/**
+ * Where a tapped notification should land.
+ *
+ * Both types point at the visit. `visit_approved` always resolves — approval
+ * is exactly what makes a completed job visible. `crew_started` resolves on
+ * the day, because /:schedule_id/detail admits
+ * `approval_status = 'approved' OR scheduled_date = CURRENT_DATE`, and a crew
+ * starts on the scheduled date.
+ *
+ * ⚠ Tapping a `crew_started` notification the NEXT day, before the visit has
+ * been approved, falls outside both halves of that predicate and 404s. That is
+ * not handled here: app/job/[id].tsx already renders "This visit is not
+ * available yet. Completed visits appear once CI admin has approved them",
+ * which is the truthful answer. Swallowing the tap instead would be worse — a
+ * dead row in the feed with no explanation.
+ */
+export function notificationTarget(n: {
+  type?: NotificationType | string | null;
+  schedule_id?: number | null;
+  thread_id?: number | null;
+}): string | null {
+  // A chat reply opens the conversation, not a visit. There is one thread per
+  // account, so the thread id is not needed in the route.
+  if (n.type === 'chat_reply') return '/support';
+  return n.schedule_id ? `/job/${n.schedule_id}` : null;
+}
+
+// A module-level pub-sub so a push arriving while the app is OPEN refreshes
+// the badge and the feed immediately. FCM shows no tray notification in the
+// foreground, so without this the customer sees nothing until the next poll.
+type PushListener = () => void;
+const pushListeners = new Set<PushListener>();
+
+/** Called by src/push.ts when a message arrives in the foreground. */
+export function pushArrived(): void {
+  pushListeners.forEach((listener) => {
+    try {
+      listener();
+    } catch {
+      // One bad subscriber must not stop the others.
+    }
+  });
+}
+
+function subscribePush(listener: PushListener): () => void {
+  pushListeners.add(listener);
+  return () => {
+    pushListeners.delete(listener);
+  };
+}
+
+/** Poll interval for the bell badge while the app is in the foreground. */
+const UNREAD_POLL_MS = 60_000;
+
+/**
+ * Unread count for the bell badge.
+ *
+ * Its own endpoint rather than reading `unread` off the feed, because the
+ * badge is live on Overview while the feed is opened rarely. Polling is
+ * deliberately paused unless the app is active — a 60s timer running in the
+ * background would drain battery for a notification the tray already showed.
+ *
+ * A failed poll is swallowed. The badge is decoration; showing an error banner
+ * on the dashboard because a count request timed out would be absurd.
+ */
+export function useUnreadCount() {
+  const [unread, setUnread] = useState(0);
+
+  const refresh = useCallback(async () => {
+    try {
+      const { data } = await api.get<UnreadResponse>('customer-portal/notifications/unread');
+      setUnread(data?.unread ?? 0);
+    } catch {
+      // Leave the previous count in place.
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') refresh();
+    }, UNREAD_POLL_MS);
+
+    // Coming back from the background is the most likely moment for the count
+    // to be stale, since that is usually a tray notification being tapped.
+    const appStateSub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') refresh();
+    });
+
+    const offPush = subscribePush(refresh);
+
+    return () => {
+      clearInterval(timer);
+      appStateSub.remove();
+      offPush();
+    };
+  }, [refresh]);
+
+  return { unread, refresh, setUnread };
+}
+
+/**
+ * The notification feed.
+ *
+ * One page of 50. There is no infinite scroll: two notifications per visit
+ * means even a daily-cleaning client takes months to fill that, and `hasMore`
+ * is surfaced as a line of text rather than a paging control nobody would hit.
+ */
+export function useNotifications() {
+  const state = useAsync<NotificationsResponse>(async () => {
+    const { data } = await api.get<NotificationsResponse>('customer-portal/notifications', {
+      params: { limit: 50 },
+    });
+    return data;
+  }, []);
+
+  // Refresh in place if a push lands while the feed is on screen.
+  useEffect(() => subscribePush(state.refresh), [state.refresh]);
+
+  return state;
+}
+
+/**
+ * Mark notifications read. Passing no ids marks the whole feed.
+ *
+ * Returns how many rows actually changed. Best-effort by design: this is
+ * called as a side effect of opening a screen, and a failure there must not
+ * produce an error the customer has to dismiss. The badge simply stays up and
+ * clears on the next attempt.
+ *
+ * ⚠ An EMPTY array is not the same as no argument. The backend reads an empty
+ * ids array as "mark these specific ones, of which none are valid" and updates
+ * nothing, so it is normalised to "mark everything" here rather than silently
+ * doing nothing.
+ */
+export async function markNotificationsRead(ids?: number[]): Promise<number> {
+  try {
+    const body = ids && ids.length > 0 ? { ids } : {};
+    const { data } = await api.post<{ success: boolean; updated: number }>(
+      'customer-portal/notifications/read',
+      body,
+    );
+    return data?.updated ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Hand this device's FCM token to the backend.
+ *
+ * Deliberately NOT swallowed — src/push.ts decides what to do on failure, and
+ * it has more context (no permission, no dev build, no Firebase config).
+ */
+export async function registerPushToken(token: string, platform: string): Promise<void> {
+  await api.post('customer-portal/push/register', { token, platform });
+}
+
+// ────────────────────────────── support chat ──────────────────────────────
+//
+// One thread per ACCOUNT, so there is no inbox on this side — the Support tab
+// IS the conversation. Staff see an inbox because an agent handles many
+// clients; a site manager only ever talks to SoWash.
+//
+// Polling, not websockets: the backend has no socket layer. 5s while the
+// screen is focused and the app is active, stopped otherwise.
+
+/** How often to poll for new messages while the Support tab is open. */
+const CHAT_POLL_MS = 5_000;
+/** How often to refresh the tab-bar unread badge from anywhere in the app. */
+const CHAT_UNREAD_POLL_MS = 60_000;
+
+/** A photo picked with expo-image-picker, reduced to what upload needs. */
+export interface ChatPhotoInput {
+  uri: string;
+  name?: string | null;
+  mimeType?: string | null;
+}
+
+export interface SendChatArgs {
+  body?: string | null;
+  photo?: ChatPhotoInput | null;
+  scheduleId?: number | null;
+}
+
+/**
+ * The conversation.
+ *
+ * Deliberately NOT built on useAsync: this needs a delta poller keyed on the
+ * last message id, an append rather than a replace, and a send path — none of
+ * which the load/refresh/error shape covers.
+ */
+export function useChat() {
+  const [thread, setThread] = useState<ChatThread | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+
+  // The poller reads this instead of `messages` so its identity stays stable
+  // and the interval is not torn down and rebuilt on every arriving message.
+  const lastIdRef = useRef(0);
+
+  const rememberLast = useCallback((list: ChatMessage[]) => {
+    if (list.length > 0) {
+      lastIdRef.current = Math.max(lastIdRef.current, list[list.length - 1].id);
+    }
+  }, []);
+
+  const markRead = useCallback(async () => {
+    try {
+      await api.post('customer-portal/chat/read', {});
+    } catch {
+      // The badge simply stays up until the next attempt.
+    }
+  }, []);
+
+  const open = useCallback(async () => {
+    try {
+      const { data } = await api.get<ChatResponse>('customer-portal/chat');
+      setThread(data?.thread ?? null);
+      const list = data?.messages ?? [];
+      setMessages(list);
+      rememberLast(list);
+      setError(null);
+      if ((data?.unread ?? 0) > 0) markRead();
+    } catch (err) {
+      setError(errorMessage(err, 'Could not open support chat.'));
+    } finally {
+      setLoading(false);
+    }
+  }, [markRead, rememberLast]);
+
+  const poll = useCallback(async () => {
+    try {
+      const { data } = await api.get<ChatDeltaResponse>('customer-portal/chat/messages', {
+        params: lastIdRef.current ? { after_id: lastIdRef.current } : undefined,
+      });
+      const fresh = data?.messages ?? [];
+      if (fresh.length === 0) return;
+
+      setMessages((prev) => {
+        // The send path appends optimistically, and a poll in flight at that
+        // moment can carry the same row back. Filtering by id keeps the list
+        // honest without needing to coordinate the two.
+        const seen = new Set(prev.map((m) => m.id));
+        return [...prev, ...fresh.filter((m) => !seen.has(m.id))];
+      });
+      rememberLast(fresh);
+
+      // Anything from the other side that arrives while the screen is open
+      // has, by definition, been seen.
+      if (fresh.some((m) => m.sender_kind === 'agent')) markRead();
+    } catch {
+      // Silent. The next tick retries.
+    }
+  }, [markRead, rememberLast]);
+
+  const send = useCallback(
+    async ({ body, photo, scheduleId }: SendChatArgs): Promise<boolean> => {
+      const text = (body ?? '').trim();
+      if (!text && !photo) return false;
+
+      setSending(true);
+      setError(null);
+      try {
+        const form = new FormData();
+        if (text) form.append('body', text);
+        if (scheduleId) form.append('schedule_id', String(scheduleId));
+        if (photo) {
+          // React Native's FormData takes this shape for a file; it is not the
+          // web File object and TypeScript has no type for it.
+          form.append('photo', {
+            uri: photo.uri,
+            name: photo.name || 'photo.jpg',
+            type: photo.mimeType || 'image/jpeg',
+          } as unknown as Blob);
+        }
+
+        const { data } = await api.post<{ success: boolean; message: ChatMessage }>(
+          'customer-portal/chat/messages',
+          form,
+          { headers: { 'Content-Type': 'multipart/form-data' } },
+        );
+
+        if (data?.message) {
+          setMessages((prev) =>
+            prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message],
+          );
+          rememberLast([data.message]);
+        }
+        return true;
+      } catch (err) {
+        setError(errorMessage(err, 'Could not send your message.'));
+        return false;
+      } finally {
+        setSending(false);
+      }
+    },
+    [rememberLast],
+  );
+
+  // Poll only while this screen is focused AND the app is foregrounded. A 5s
+  // timer left running behind a backgrounded app is a battery complaint.
+  useFocusEffect(
+    useCallback(() => {
+      open();
+      const timer = setInterval(() => {
+        if (AppState.currentState === 'active') poll();
+      }, CHAT_POLL_MS);
+
+      const offPush = subscribePush(poll);
+
+      return () => {
+        clearInterval(timer);
+        offPush();
+      };
+    }, [open, poll]),
+  );
+
+  return { thread, messages, loading, error, sending, send, refresh: open };
+}
+
+/**
+ * Unread message count for the Support tab badge.
+ *
+ * Separate from useUnreadCount() (the bell). They are different inboxes: the
+ * bell is job events, this is someone waiting for a reply. Collapsing them
+ * would mean a customer clearing the bell also silences an unanswered
+ * question.
+ */
+export function useChatUnread() {
+  const [unread, setUnread] = useState(0);
+
+  const refresh = useCallback(async () => {
+    try {
+      const { data } = await api.get<UnreadResponse>('customer-portal/chat/unread');
+      setUnread(data?.unread ?? 0);
+    } catch {
+      // Leave the previous count in place.
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') refresh();
+    }, CHAT_UNREAD_POLL_MS);
+
+    const appStateSub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') refresh();
+    });
+
+    const offPush = subscribePush(refresh);
+
+    return () => {
+      clearInterval(timer);
+      appStateSub.remove();
+      offPush();
+    };
+  }, [refresh]);
+
+  return { unread, refresh };
 }
