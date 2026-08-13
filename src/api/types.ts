@@ -311,3 +311,46 @@ export interface MaintenanceDetailResponse {
     email: string | null;
   };
 }
+
+// ─────────────────────────── notifications ───────────────────────────
+//
+// Written by sowash-backend/services/commercialNotifications.js, read through
+// /api/customer-portal/notifications. Backed by the commercial_notifications
+// table (migration 2026-08-13).
+
+/**
+ * The two events a commercial customer is told about.
+ *
+ * Kept as a union rather than a bare string so adding a type without also
+ * teaching notificationTarget() where it should navigate is a compile error.
+ * It mirrors the CHECK constraint on commercial_notifications.type exactly.
+ *
+ * There is deliberately no 'visit_completed'. The portal hides completed
+ * visits until CI admin approves them, so approval is the first moment one
+ * exists for the customer — see the migration header.
+ */
+export type NotificationType = 'crew_started' | 'visit_approved';
+
+export interface AppNotification {
+  id: number;
+  type: NotificationType;
+  title: string;
+  body: string | null;
+  /** site_schedules.id. Null only if the visit was deleted after the fact. */
+  schedule_id: number | null;
+  /** Null means unread. A timestamp, not a boolean — see the migration. */
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface NotificationsResponse {
+  success: boolean;
+  notifications: AppNotification[];
+  unread: number;
+  hasMore: boolean;
+}
+
+export interface UnreadResponse {
+  success: boolean;
+  unread: number;
+}

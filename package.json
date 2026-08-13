@@ -4,9 +4,12 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.8",
+    "@react-native-firebase/app": "26.0.0",
+    "@react-native-firebase/messaging": "26.0.0",
     "axios": "^1.19.0",
     "expo": "~57.0.11",
     "expo-blur": "~57.0.2",
+    "expo-build-properties": "~57.0.8",
     "expo-constants": "~57.0.9",
     "expo-dev-client": "~57.0.10",
     "expo-image-picker": "~57.0.8",
