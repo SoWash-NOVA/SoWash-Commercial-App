@@ -29,10 +29,19 @@ import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import { notificationTarget, pushArrived, registerPushToken } from './hooks';
 
-/** What services/commercialNotifications.js puts in the FCM data block. */
+/**
+ * What services/commercialNotifications.js puts in the FCM data block.
+ *
+ * Every value is a STRING — FCM rejects a data payload containing anything
+ * else, and rejects the whole multicast rather than the offending key, so the
+ * backend coerces on the way out and this parses on the way in.
+ */
 interface PushData {
   type?: string;
+  /** Set on crew_started / visit_approved. */
   schedule_id?: string;
+  /** Set on chat_reply. */
+  thread_id?: string;
 }
 
 type Unsubscribe = () => void;
@@ -81,14 +90,23 @@ async function ensurePermission(): Promise<boolean> {
   }
 }
 
-/** Resolve where a tapped push should land, from its data block. */
+/**
+ * Resolve where a tapped push should land, from its data block.
+ *
+ * Routing lives in notificationTarget() in src/hooks.ts, shared with the bell
+ * screen, so a notification opened from the tray and the same notification
+ * opened from the feed can never disagree about where they go.
+ */
 export function targetFromPushData(data: PushData | undefined): string | null {
   if (!data?.type) return null;
 
   const scheduleId = data.schedule_id ? Number(data.schedule_id) : null;
+  const threadId = data.thread_id ? Number(data.thread_id) : null;
 
   return notificationTarget({
+    type: data.type,
     schedule_id: Number.isFinite(scheduleId) && scheduleId ? scheduleId : null,
+    thread_id: Number.isFinite(threadId) && threadId ? threadId : null,
   });
 }
 

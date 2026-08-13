@@ -328,8 +328,11 @@ export interface MaintenanceDetailResponse {
  * There is deliberately no 'visit_completed'. The portal hides completed
  * visits until CI admin approves them, so approval is the first moment one
  * exists for the customer — see the migration header.
+ *
+ * 'chat_reply' was added in Phase 6. Those rows carry thread_id instead of
+ * schedule_id and route to the Support tab rather than to a visit.
  */
-export type NotificationType = 'crew_started' | 'visit_approved';
+export type NotificationType = 'crew_started' | 'visit_approved' | 'chat_reply';
 
 export interface AppNotification {
   id: number;
@@ -338,6 +341,8 @@ export interface AppNotification {
   body: string | null;
   /** site_schedules.id. Null only if the visit was deleted after the fact. */
   schedule_id: number | null;
+  /** commercial_chat_threads.id. Set on chat_reply, null on visit events. */
+  thread_id: number | null;
   /** Null means unread. A timestamp, not a boolean — see the migration. */
   read_at: string | null;
   created_at: string;
@@ -353,4 +358,53 @@ export interface NotificationsResponse {
 export interface UnreadResponse {
   success: boolean;
   unread: number;
+}
+
+// ─────────────────────────────── chat ───────────────────────────────
+//
+// One thread per CLIENT: every site manager on the account shares the
+// conversation, and each message records who sent it. Backed by
+// commercial_chat_* (migration 2026-08-13_commercial_chat.sql), read and
+// written through /api/customer-portal/chat.
+
+export type ChatSenderKind = 'customer' | 'agent' | 'system';
+
+/** The optional "about this visit" tag on a message. */
+export interface ChatVisitTag {
+  id: number;
+  site_name: string | null;
+  scheduled_date: string | null;
+  status: string | null;
+}
+
+export interface ChatMessage {
+  id: number;
+  sender_kind: ChatSenderKind;
+  body: string | null;
+  /** Server path like "/uploads/commercial-chat/…". Needs SERVER_BASE. */
+  attachment_url: string | null;
+  attachment_name: string | null;
+  created_at: string;
+  /** Staff name on an agent message; the sender's name on a customer one. */
+  sender_name: string | null;
+  visit: ChatVisitTag | null;
+}
+
+export interface ChatThread {
+  id: number;
+  status: string;
+  last_message_at: string | null;
+}
+
+export interface ChatResponse {
+  success: boolean;
+  thread: ChatThread;
+  messages: ChatMessage[];
+  unread: number;
+}
+
+export interface ChatDeltaResponse {
+  success: boolean;
+  messages: ChatMessage[];
+  count: number;
 }
