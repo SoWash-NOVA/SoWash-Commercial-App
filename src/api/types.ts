@@ -369,12 +369,49 @@ export interface UnreadResponse {
 
 export type ChatSenderKind = 'customer' | 'agent' | 'system';
 
-/** The optional "about this visit" tag on a message. */
+/**
+ * The optional "about this visit" tag on a message.
+ *
+ * Rendered as a preview card, not a line of text: site, date, crew, and up to
+ * four photos of the actual work, opening the full visit on tap. Everything
+ * here is built server-side by utils/commercialChatVisit.js and rides along on
+ * the message, so the card costs no extra request.
+ *
+ * ⚠ can_open is the one field to respect. The detail endpoint,
+ * GET /customer-portal/:id/detail, admits a visit only when
+ * `approval_status = 'approved' OR scheduled_date = CURRENT_DATE` — so a
+ * completed visit CI admin has not approved yet is tagged, listed, and
+ * genuinely un-openable. When can_open is false the backend also withholds
+ * photos, team_lead_name and the address: the card must explain itself rather
+ * than offer a tap that 404s. Same expiry that makes a `crew_started` push
+ * deep-link go stale overnight.
+ */
 export interface ChatVisitTag {
   id: number;
   site_name: string | null;
   scheduled_date: string | null;
   status: string | null;
+  approval_status: string | null;
+
+  /** Withheld (null) when can_open is false. */
+  address: string | null;
+  city: string | null;
+  team_lead_name: string | null;
+
+  /**
+   * Up to four thumbnails, after-photos first, already normalised to
+   * "/uploads/…" — still run them through photoUrl(), never concatenate.
+   * Empty when can_open is false.
+   */
+  photos: string[];
+  /** Total across before + after, which may exceed photos.length. */
+  photo_count: number;
+
+  /** Whether GET /customer-portal/:id/detail will return this visit. */
+  can_open: boolean;
+
+  /** Always false on this side — a staff-console badge. */
+  pending_approval: boolean;
 }
 
 export interface ChatMessage {
