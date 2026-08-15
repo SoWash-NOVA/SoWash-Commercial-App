@@ -40,6 +40,9 @@ import { useAccent } from '../../src/theme-context';
 import { photoUrl } from '../../src/api/client';
 import { useChat, useJobs, formatDateOnly, formatTime, ChatPhotoInput } from '../../src/hooks';
 import { ChatMessage } from '../../src/api/types';
+// A tagged visit renders as a preview card — photos, site, crew — that opens
+// the whole visit in a sheet. See src/components/ChatVisitCard.tsx.
+import ChatVisitCard from '../../src/components/ChatVisitCard';
 
 export default function SupportScreen() {
   const { accent } = useAccent();
@@ -266,13 +269,7 @@ function Bubble({ message, accent }: { message: ChatMessage; accent: string }) {
           <Text style={[local.sender, { color: accent }]}>{message.sender_name}</Text>
         ) : null}
 
-        {message.visit ? (
-          <View style={[local.visitChip, mine ? local.visitChipMine : null]}>
-            <Text style={[local.visitChipText, mine ? { color: '#ffffffcc' } : null]} numberOfLines={1}>
-              {message.visit.site_name} · {formatDateOnly(message.visit.scheduled_date)}
-            </Text>
-          </View>
-        ) : null}
+        {message.visit ? <ChatVisitCard visit={message.visit} mine={mine} /> : null}
 
         {url ? <Image source={{ uri: url }} style={local.photo} resizeMode="cover" /> : null}
 
@@ -303,16 +300,8 @@ const local = StyleSheet.create({
   text: { fontSize: 14, lineHeight: 20 },
   time: { fontSize: 10.5, fontWeight: '600', marginTop: 4, alignSelf: 'flex-end' },
   photo: { width: 200, height: 150, borderRadius: 12, marginBottom: 6 },
-  visitChip: {
-    backgroundColor: palette.borderSubtle,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    marginBottom: 6,
-    alignSelf: 'flex-start',
-  },
-  visitChipMine: { backgroundColor: '#ffffff2e' },
-  visitChipText: { fontSize: 11, fontWeight: '700', color: palette.muted },
+  // The visit tag's styling lives in src/components/ChatVisitCard.tsx — it is
+  // a preview card now, not a chip.
 
   composer: {
     borderTopWidth: 1,
