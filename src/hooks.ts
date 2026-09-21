@@ -29,7 +29,9 @@ import {
   ChatThread,
   NotificationsResponse,
   NotificationType,
+  SafetyTrainingPhotosResponse,
   SldWalkthroughResponse,
+  TbtPhotosResponse,
   UnreadResponse,
 } from './api/types';
 
@@ -227,6 +229,35 @@ export function useMaintenanceDetail(id: number | string | null) {
     );
     return data;
   }, [id]);
+}
+
+/**
+ * TBT (toolbox talk) photos — one per completed job, gated the same way
+ * /history gates a job's own photos (see the backend route's comment).
+ * Uploaded from the staff web portal; this app only reads.
+ */
+export function useTbtPhotos(siteId: number | null = null) {
+  return useAsync<TbtPhotosResponse>(async () => {
+    const params: Record<string, number> = {};
+    if (siteId) params.site_id = siteId;
+    const { data } = await api.get<TbtPhotosResponse>('customer-portal/documentation/tbt', {
+      params,
+    });
+    return data;
+  }, [siteId]);
+}
+
+/** Safety Training photos — client/site-wide, not tied to a specific visit. */
+export function useSafetyTrainingPhotos(siteId: number | null = null) {
+  return useAsync<SafetyTrainingPhotosResponse>(async () => {
+    const params: Record<string, number> = {};
+    if (siteId) params.site_id = siteId;
+    const { data } = await api.get<SafetyTrainingPhotosResponse>(
+      'customer-portal/documentation/safety-training',
+      { params },
+    );
+    return data;
+  }, [siteId]);
 }
 
 // ────────────────────────────── derived ──────────────────────────────

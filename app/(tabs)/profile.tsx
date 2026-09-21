@@ -23,6 +23,7 @@ import {
   CalendarDays,
   ChevronRight,
   CreditCard,
+  FileText,
   Hash,
   LogOut,
   Mail,
@@ -205,6 +206,11 @@ export default function ProfileScreen() {
             icon={<Wrench size={16} color={palette.muted} />}
             label="Maintenance history"
             onPress={() => router.push('/maintenance')}
+          />
+          <LinkRow
+            icon={<FileText size={16} color={palette.muted} />}
+            label="Documentation"
+            onPress={() => router.push('/documentation' as never)}
           />
           <LinkRow
             icon={<ShieldCheck size={16} color={palette.muted} />}

@@ -73,6 +73,7 @@ import {
   CloudSun,
   Droplets,
   Activity,
+  FileText,
   Inbox,
   Layers,
   MapPin,
@@ -393,6 +394,17 @@ export default function OverviewScreen() {
           <View style={{ flex: 1 }}>
             <Text style={s.linkTitle}>Maintenance</Text>
             <Text style={s.linkSub}>Contract tasks and checklists</Text>
+          </View>
+          <ArrowRight size={16} color={palette.mutedLight} />
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => router.push('/documentation' as never)} style={s.linkTile} activeOpacity={0.9}>
+          <View style={[s.linkIcon, { backgroundColor: `${accentColor}14` }]}>
+            <FileText size={18} color={accentColor} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={s.linkTitle}>Documentation</Text>
+            <Text style={s.linkSub}>SLD, TBT, safety training, inspections</Text>
           </View>
           <ArrowRight size={16} color={palette.mutedLight} />
         </TouchableOpacity>

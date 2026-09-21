@@ -312,6 +312,58 @@ export interface MaintenanceDetailResponse {
   };
 }
 
+// ─────────────────────────── documentation ───────────────────────────
+//
+// The "Documentation" menu: Site SLD (reuses the existing per-visit
+// walkthrough — see SldWalkthroughResponse above, no new type needed), TBT,
+// Safety Training, and Equipment Inspection (reuses MaintenanceJob above).
+//
+// Backend: routes/customerJobHistoryRoutes.js
+// (GET /customer-portal/documentation/tbt, /safety-training). captured_at is
+// a real timestamp — render with formatDateTime()/formatTime(), never
+// formatDateOnly()/relativeDay() (those are for DATE columns).
+//
+// TBT reads from field_service_reports.temp_voltage_photos (a JSON array —
+// TBT already had a real capture pipeline before this feature existed; see
+// the backend route's comment). Grouped ONE ENTRY PER JOB, not one per photo
+// — a visit's several TBT photos belong together as that visit's toolbox
+// talk, not as separate list rows. `photos[].id` is a synthetic
+// `${schedule_id}-${index}` string, not a real row id.
+
+export interface TbtPhotoEntry {
+  id: string;
+  photo_url: string;
+  captured_at: string;
+}
+
+export interface TbtJob {
+  schedule_id: number;
+  site_id: number | null;
+  site_name: string;
+  /** DATE column, already TO_CHAR'd server-side — a plain 'YYYY-MM-DD' string. */
+  scheduled_date: string | null;
+  service_number: number | null;
+  photos: TbtPhotoEntry[];
+}
+
+export interface TbtPhotosResponse {
+  success: boolean;
+  jobs: TbtJob[];
+}
+
+export interface SafetyTrainingPhoto {
+  id: number;
+  site_id: number | null;
+  photo_url: string;
+  captured_at: string;
+  site_name: string;
+}
+
+export interface SafetyTrainingPhotosResponse {
+  success: boolean;
+  photos: SafetyTrainingPhoto[];
+}
+
 // ─────────────────────────── notifications ───────────────────────────
 //
 // Written by sowash-backend/services/commercialNotifications.js, read through
