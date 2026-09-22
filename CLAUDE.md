@@ -351,6 +351,81 @@ Newest first. Each entry: what changed, in which file(s)/repo, and deploy status
 backend's deploys are **manual** — WinSCP sync + `pm2 restart` on the VPS, nothing here
 auto-deploys, so "fixed" below means "fixed in this working tree," not "live").
 
+### 2026-09-22 — Login screen keyboard fix, EAS APK build profile, session status
+
+**Login screen fix (`app/login.tsx`):** reported as "make the login page responsive when
+typing." Root cause: `KeyboardAvoidingView`'s `behavior` prop was
+`Platform.OS === 'ios' ? 'padding' : undefined` — on Android this is a complete no-op, so nothing
+shrank or shifted the layout when the keyboard opened. Combined with the screen's content being
+vertically centered (`justifyContent: 'center'` on the `ScrollView`'s `contentContainerStyle`,
+with no scroll-to-focused-input wiring), the keyboard could cover the password field / Sign In
+button on Android with no way to see it short of manually scrolling. **Fixed**: behavior is now
+`'height'` on Android (`'padding'` stays on iOS), plus a small `keyboardVerticalOffset`. Committed
+as part of `b6d6f9f`.
+
+**EAS build — APK profile (`eas.json`):** the user wanted to build a plain installable `.apk`
+rather than the Play-Store-oriented `.aab` that the existing `production` profile's default
+Android `buildType` produces. Added a new `production-apk` profile
+(`{ "extends": "production", "android": { "buildType": "apk" } }`) rather than changing
+`production` itself, so Play Store submission (`eas.json`'s `submit.production`) still gets an
+AAB when that's actually wanted. Build with:
+```
+eas build --platform android --profile production-apk
+```
+
+**Started, not finished — performance audit:** the user asked for a general "is the app loading
+very slow" check. Before this was interrupted by the TBT bug report above, initial findings (not
+yet acted on, worth returning to):
+- `AuthProvider` (`src/auth/AuthContext.tsx`) blocks the ENTIRE app behind a network round trip on
+  every cold start — `status` stays `'loading'` (full-screen spinner, nothing else renders) until
+  `GET /customer-portal/customer/profile` resolves, even on the happy path where the stored token
+  is still valid. A common fix: set `status: 'signedIn'` optimistically as soon as a stored token
+  + cached user exist, and run the profile-validation call in the background, only bouncing to
+  `/login` if it later comes back 401/403. Would remove a full network round trip from first
+  paint on every launch.
+- `react-native-reanimated` + `react-native-worklets` are installed but genuinely unused anywhere
+  in the JS (confirmed already in §6) — as native modules they still autolink into the native
+  binary and pay Android/iOS startup registration cost even though nothing imports them. Removing
+  both from `package.json` (and running `npx expo prebuild --clean` / a fresh EAS build after)
+  would trim native binary size and startup work with no behavior change.
+- No `expo-image` anywhere — every photo (job before/after, SLD point photos, the new
+  Documentation screens) uses plain React Native `<Image>`, which caches less reliably than
+  `expo-image` (memory+disk cache, faster decode). Would matter most for photo-heavy screens
+  (Visits list, job detail's `PhotoStrip`, the new TBT strip) on a slow connection or when
+  scrolling back through history. A real fix, but touches many files — worth doing as its own
+  pass rather than folding into an unrelated change.
+- Did not get to: checking `useChat`'s poll interval, `SiteProvider`'s refetch-on-every-tab-mount
+  behavior, or the Overview tab's own fetch waterfall (`useJobs` + `useStats` + `useUnreadCount` +
+  live weather, all on one screen). Flagging as unexamined, not as "fine."
+
+**What's actually remaining right now, across both repos:**
+1. **Deploy to the VPS** — `sowash-backend`'s `routes/customerJobHistoryRoutes.js`,
+   `routes/ciDocumentationRoutes.js`, and `server.js` are still sitting uncommitted in the local
+   working tree (`git status` in that repo shows all three, plus the untracked
+   `docs/migrations/2026-09-21-commercial-documentation-photos.sql` and this repo's own
+   `.claude-backups/server.js.20260921-151226.bak`). None of this has been confirmed uploaded via
+   WinSCP or `pm2 restart`ed. Until it is: TBT and Safety Training's GET endpoints do not exist on
+   the live server, and neither the TBT grouping fix nor the Safety Training upload endpoint are
+   live either.
+2. **Commit the backend changes** — `sowash-backend` has no commit for any of this session's work
+   (the table migration, `ciDocumentationRoutes.js`, or the `customerJobHistoryRoutes.js` changes).
+   `git status` there is still dirty. (`attendanceReviewRoutes.js`'s modification is unrelated,
+   pre-existing, and explicitly left alone per the user's instruction — not part of this feature.)
+3. **Safety Training upload UI** on `sowash-frontend` (the web portal) — not started. This is the
+   user's team's own separate task; the backend contract (`POST /api/ci-admin/documentation`) is
+   ready and waiting for it.
+4. **The two 2026-09-17 backend fixes** (status-vocabulary mismatch, date off-by-one) remain
+   **reverted, not applied** — see those entries below. Both bugs are still live on the deployed
+   server; re-apply only if/when they actually cause a reported symptom (the one symptom reported
+   so far turned out to be the approval gate, not either of these).
+5. **Performance audit** — not delivered yet; see the findings above. Nothing has been changed
+   for this.
+6. **Pre-existing, unrelated typecheck error** in `app/(tabs)/_layout.tsx` (a `NavigationHelpers`
+   type mismatch on the custom tab bar) — present before this session, still present, out of scope
+   for everything done so far.
+7. **`eas build --platform android --profile production-apk`** — command handed to the user;
+   not yet run/confirmed as of this entry.
+
 ### 2026-09-21 — New feature: "Documentation" menu (Site SLD, TBT, Safety Training, Equipment Inspection)
 
 **What was added:** a new "Documentation" entry point (link tile on Overview + row in Account,
@@ -415,17 +490,32 @@ are. **Fixed** by dropping the site filter entirely, matching `/maintenance`'s o
 convention (also a root-level screen, also has no site switcher) — each row/card just shows its
 own site name instead.
 
+**Third bug caught after that:** the user tested with real data (confirmed via a direct SQL check
+that several of their own client's completed jobs had `field_service_reports.temp_voltage_photos`
+populated) and found the TBT screen still showed only one photo overall. Root cause was neither
+of the two things checked first (approval gate was fine; the array-flattening logic was already
+correct) — it was a UI/response-shape choice: `GET /documentation/tbt` and `TbtScreen` originally
+modeled TBT as ONE FLAT LIST OF PHOTOS (one row per photo, `{ photos: TbtPhoto[] }`), so a job
+with 3 TBT photos rendered as 3 separate rows scattered through the list by `captured_at`, not
+as "3 photos, one visit." **Fixed**: reshaped the response to `{ jobs: TbtJob[] }` — one entry per
+completed visit, each carrying its own `photos: TbtPhotoEntry[]` array — and rewrote
+`app/documentation/tbt.tsx` to render one card per job with a horizontal photo strip (mirrors
+`JobDetailBody.tsx`'s `PhotoStrip` component). `TbtPhoto`/`TbtPhotosResponse` in `src/api/types.ts`
+were replaced by `TbtJob`/`TbtPhotoEntry`/`TbtPhotosResponse` accordingly.
+
 **Not done / blocked on the user's team:** the actual Safety Training upload UI on
 `sowash-frontend`. Until that exists, that screen shows a normal, correct empty state ("No safety
 training photos yet") — not a bug, there is simply nothing uploaded yet. TBT should show real
-data as soon as the backend files below are deployed, for any client with a completed job that
-already has TBT photos.
+data (grouped correctly, per the fix above) as soon as the backend files are deployed, for any
+client with a completed job that already has TBT photos.
 
-**Status:** app-side code typechecks clean (`npm run typecheck` — one pre-existing, unrelated
-error remains in `app/(tabs)/_layout.tsx`, not touched by this change). Migration has been
-applied to the database. **Backend code (`customerJobHistoryRoutes.js`, `ciDocumentationRoutes.js`,
-`server.js`) had not been confirmed deployed to the VPS as of this entry** — until it is, neither
-new GET endpoint exists on the live server.
+**Status:** app-side code committed (`b6d6f9f`, "Documentation Section added and Tbt is showing
+now") and typechecks clean (`npm run typecheck` — one pre-existing, unrelated error remains in
+`app/(tabs)/_layout.tsx`, not touched by this change). Migration has been applied to the database.
+**Backend code (`customerJobHistoryRoutes.js`, `ciDocumentationRoutes.js`, `server.js`) is still
+uncommitted in the `sowash-backend` working tree and had not been confirmed uploaded/deployed to
+the VPS as of this entry** — until it is, neither new GET endpoint exists on the live server, and
+TBT will keep showing nothing in production regardless of how correct the code now is.
 
 ### 2026-09-21 — Investigated: completed job showing as "in progress" in the app (this occurrence — not a code bug)
 
