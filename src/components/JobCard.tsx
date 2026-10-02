@@ -17,7 +17,7 @@ import { JobSummary } from '../api/types';
 import { formatDateOnly, relativeDay, statusMeta } from '../hooks';
 import { parsePhotos } from '../api/client';
 
-export function JobCard({ job, showSite = true }: { job: JobSummary; showSite?: boolean }) {
+function JobCardImpl({ job, showSite = true }: { job: JobSummary; showSite?: boolean }) {
   const router = useRouter();
   const { accent } = useAccent();
 
@@ -136,4 +136,5 @@ const local = StyleSheet.create({
   badgeText: { fontSize: 11, fontWeight: '700', color: palette.muted, maxWidth: 130 },
 });
 
+export const JobCard = React.memo(JobCardImpl);
 export default JobCard;

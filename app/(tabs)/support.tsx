@@ -29,6 +29,9 @@
 // a `sites` array (the same list SiteSwitcher must be rendering from). If
 // the real property has a different name, tell me and it's a one-line fix.
 
+import { useChatScroll } from '../../src/useChatScroll';
+import { useChatSurface } from '../../src/chat-focus';
+import KeyboardScreen from '../../src/components/KeyboardScreen';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -37,16 +40,16 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
-  Image,
   Modal,
   Pressable,
-  KeyboardAvoidingView,
   Platform,
   StyleSheet,
   Animated,
   Easing,
+  useWindowDimensions,
 } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+import { Image } from 'expo-image';
+import { promptChatPhotoSource } from '../../src/photoPicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Bell,
@@ -55,7 +58,9 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
+  Clock,
   ImagePlus,
+  MapPin,
   MessagesSquare,
   Send,
   Users,
@@ -65,13 +70,37 @@ import { palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useSiteContext } from '../../src/site-context';
 import { photoUrl } from '../../src/api/client';
-import { useChat, useJobs, formatDateOnly, formatTime, ChatPhotoInput } from '../../src/hooks';
-import { ChatMessage } from '../../src/api/types';
+import { useChat, useJobs, useSiteRings, formatDateOnly, formatTime, ChatPhotoInput } from '../../src/hooks';
+import { useAuth } from '../../src/auth/AuthContext';
+import { LinearGradient } from 'expo-linear-gradient';
+import ChatBackground from '../../src/components/ChatBackground';
+import { shade } from '../../src/utils/color';
+import { HEADER_STOPS } from '../../src/brand';
+import ChatHeaderBar from '../../src/components/ChatHeaderBar';
+import { ChatMessage, ChatRing, TeamReaction } from '../../src/api/types';
 // A tagged visit renders as a preview card — photos, site, crew — that opens
 // the whole visit in a sheet. See src/components/ChatVisitCard.tsx.
 import ChatVisitCard from '../../src/components/ChatVisitCard';
 
-const TAB_BAR_CLEARANCE = 92;
+const TAB_BAR_CLEARANCE = 0;
+
+/** WhatsApp's default quick reactions (same set as the staff app). */
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+type ActionRect = { x: number; y: number; w: number; h: number };
+
+/**
+ * Is this message MINE? A client can have several portal logins sharing one
+ * thread, so `sender_kind === 'customer'` only means "someone at my company" —
+ * a colleague's message must sit on the left with their name, not on my side.
+ * Falls back to "mine" when the server didn't say who sent it (older server),
+ * which is the previous behaviour.
+ */
+function isMine(message: ChatMessage, myUserId: number | undefined): boolean {
+  if (message.sender_kind !== 'customer') return false;
+  if (message.sender_user_id == null || myUserId == null) return true;
+  return message.sender_user_id === myUserId;
+}
 const RING_COOLDOWN_MS = 60_000;
 const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -91,6 +120,14 @@ function colorFor(name: string, palette_: string[]) {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
   return palette_[hash % palette_.length];
+}
+
+/** Mirrors usePhotoBubbleSize in app/staff/chats.tsx — same s.bubble 78%-width cap, same reasoning. */
+function usePhotoBubbleSize() {
+  const { width } = useWindowDimensions();
+  const maxWidth = width * 0.78 - 24;
+  const w = Math.min(200, Math.max(140, maxWidth));
+  return { width: w, height: w * 0.75 };
 }
 
 /** "2026-09-16" style timestamp -> "Today" / "Yesterday" / "16 Sep 2026". */
@@ -143,12 +180,20 @@ function buildRows(messages: ChatMessage[]): Row[] {
 
 export default function SupportScreen() {
   const [activeSite, setActiveSite] = useState<SiteLike | 'general' | null>(null);
+  // Inside a site's rings or the General chat: hide the tab bar; Android back returns to the site list (not Overview).
+  useChatSurface(activeSite !== null, () => setActiveSite(null));
 
+  // General holds the whole conversation. A site is NOT a chat: it shows that
+  // site's ring history and lets the client ring again (see SiteRings).
+  if (activeSite === 'general') {
+    return <ChatThread site={null} onBack={() => setActiveSite(null)} />;
+  }
   if (activeSite) {
     return (
-      <ChatThread
-        site={activeSite === 'general' ? null : activeSite}
+      <SiteRings
+        site={activeSite}
         onBack={() => setActiveSite(null)}
+        onOpenGeneral={() => setActiveSite('general')}
       />
     );
   }
@@ -174,12 +219,13 @@ function SiteList({ onOpen }: { onOpen: (site: SiteLike | 'general') => void }) 
         <View style={[s.blob, { backgroundColor: '#ede9fe', top: 200, right: -100, width: 240, height: 240 }]} />
       </View>
 
-      <View style={s.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={s.title}>Support</Text>
-          <Text style={s.headerSub}>Pick a site to start a conversation</Text>
-        </View>
-      </View>
+      <ChatHeaderBar
+        rounded
+        style={{ flexDirection: 'column', alignItems: 'stretch', paddingHorizontal: 20, paddingBottom: 18, gap: 2 }}
+      >
+        <Text style={s.listTitle}>Support</Text>
+        <Text style={s.listSub}>Ring support for a site, or open General for the full conversation</Text>
+      </ChatHeaderBar>
 
       <FlatList
         data={sites}
@@ -194,7 +240,7 @@ function SiteList({ onOpen }: { onOpen: (site: SiteLike | 'general') => void }) 
             <View style={{ flex: 1 }}>
               <Text style={s.siteName}>General</Text>
               <Text style={s.siteSub} numberOfLines={1}>
-                Not about one specific site
+                The full conversation with SoWash
               </Text>
             </View>
             <ChevronRight size={18} color={palette.mutedLight} />
@@ -212,7 +258,7 @@ function SiteList({ onOpen }: { onOpen: (site: SiteLike | 'general') => void }) 
                   {name}
                 </Text>
                 <Text style={s.siteSub} numberOfLines={1}>
-                  Shared account conversation
+                  Ring support · see past rings
                 </Text>
               </View>
               <ChevronRight size={18} color={palette.mutedLight} />
@@ -232,13 +278,221 @@ function SiteList({ onOpen }: { onOpen: (site: SiteLike | 'general') => void }) 
 }
 
 /* ==================================================================== *
+ * One site — ring history + ring again
+ * ==================================================================== */
+
+const RING_STATUS = {
+  waiting: { label: 'Waiting', color: '#b45309', bg: '#fef3c7' },
+  answered: { label: 'Support replied', color: '#1d4ed8', bg: '#dbeafe' },
+  completed: { label: 'Completed', color: '#15803d', bg: '#dcfce7' },
+} as const;
+
+/** The default ring text carries no information — only show a note the client actually typed. */
+function ringNote(body: string | null): string | null {
+  if (!body) return null;
+  const marker = ' — ';
+  const i = body.indexOf(marker);
+  const after = i === -1 ? '' : body.slice(i + marker.length).trim();
+  if (!after || after.startsWith("I'd like to talk to someone")) return null;
+  return after;
+}
+
+function stamp(iso: string) {
+  return `${dayLabel(iso)} · ${formatTime(iso)}`;
+}
+
+function SiteRings({
+  site,
+  onBack,
+  onOpenGeneral,
+}: {
+  site: SiteLike;
+  onBack: () => void;
+  onOpenGeneral: () => void;
+}) {
+  const { accent } = useAccent();
+  const insets = useSafeAreaInsets();
+  const { rings, loading, error, sending, ring } = useSiteRings(site.id);
+  const [note, setNote] = useState('');
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [, force] = useState(0);
+  const onCooldown = Date.now() < cooldownUntil;
+
+  // Re-render when the cooldown ends so the button un-greys itself.
+  useEffect(() => {
+    if (!onCooldown) return undefined;
+    const t = setTimeout(() => force((n) => n + 1), Math.max(0, cooldownUntil - Date.now()) + 50);
+    return () => clearTimeout(t);
+  }, [onCooldown, cooldownUntil]);
+
+  const name = site.site_name || 'Site';
+  const waitingCount = rings.filter((r) => r.status === 'waiting').length;
+
+  const sendRing = async () => {
+    if (sending || onCooldown) return;
+    const extra = note.trim();
+    const ok = await ring(
+      `🔔 Ringing about ${name} — ${extra || "I'd like to talk to someone when you're free."}`,
+    );
+    if (ok) {
+      setNote('');
+      setCooldownUntil(Date.now() + RING_COOLDOWN_MS);
+    }
+  };
+
+  const renderRing = ({ item }: { item: ChatRing }) => {
+    const meta = RING_STATUS[item.status];
+    const extra = ringNote(item.body);
+    return (
+      <View style={s.ringCard}>
+        <View style={s.ringCardTop}>
+          <Bell size={14} color={palette.muted} />
+          <Text style={s.ringCardTime}>{stamp(item.created_at)}</Text>
+          <View style={[s.ringPill, { backgroundColor: meta.bg }]}>
+            <Text style={[s.ringPillText, { color: meta.color }]}>{meta.label}</Text>
+          </View>
+        </View>
+        {extra ? <Text style={s.ringCardNote}>{extra}</Text> : null}
+        {item.status === 'completed' && item.completed_at ? (
+          <Text style={s.ringCardSub}>Completed {stamp(item.completed_at)}</Text>
+        ) : item.status === 'answered' && item.answered_at ? (
+          <Text style={s.ringCardSub}>Replied {stamp(item.answered_at)}</Text>
+        ) : (
+          <Text style={s.ringCardSub}>Waiting for the SoWash team</Text>
+        )}
+      </View>
+    );
+  };
+
+  return (
+    <KeyboardScreen style={s.screen}>
+      <ChatBackground />
+
+      <ChatHeaderBar>
+        <TouchableOpacity onPress={onBack} style={s.backBtn} hitSlop={8}>
+          <ChevronLeft size={24} color="#fff" />
+        </TouchableOpacity>
+        <View style={[s.headerAvatar, { backgroundColor: colorFor(name, SITE_TINTS) }]}>
+          <Text style={s.headerAvatarText}>{initial(name)}</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={s.threadTitleOnColor} numberOfLines={1}>
+            {name}
+          </Text>
+          <Text style={s.statusTextOnColor}>
+            {waitingCount > 0
+              ? `${waitingCount} ring${waitingCount === 1 ? '' : 's'} waiting`
+              : 'Ring history'}
+          </Text>
+        </View>
+      </ChatHeaderBar>
+
+      {loading && rings.length === 0 ? (
+        <View style={s.centre}>
+          <ActivityIndicator size="large" color={accent} />
+        </View>
+      ) : (
+        <FlatList
+          data={rings}
+          keyExtractor={(r) => String(r.id)}
+          renderItem={renderRing}
+          style={{ flex: 1 }}
+          contentContainerStyle={s.ringList}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={s.emptyCard}>
+              <View style={[s.emptyIcon, { backgroundColor: `${accent}14` }]}>
+                <Bell size={24} color={accent} />
+              </View>
+              <Text style={s.emptyTitle}>{error ? 'Could not load rings' : 'No rings yet'}</Text>
+              <Text style={s.emptyBody}>
+                {error ||
+                  `Ring the SoWash team about ${name} and it will be listed here, so you can see when it is answered and completed.`}
+              </Text>
+            </View>
+          }
+          ListFooterComponent={
+            <TouchableOpacity style={s.generalLink} onPress={onOpenGeneral} activeOpacity={0.8}>
+              <MessagesSquare size={15} color={accent} />
+              <Text style={[s.generalLinkText, { color: accent }]}>
+                Need to chat or send a photo? Open General
+              </Text>
+            </TouchableOpacity>
+          }
+        />
+      )}
+
+      <View style={[s.ringComposer, { paddingBottom: 10 + TAB_BAR_CLEARANCE }]}>
+        <TextInput
+          value={note}
+          onChangeText={setNote}
+          placeholder="Add a note (optional)"
+          placeholderTextColor={palette.mutedLight}
+          style={s.ringNoteInput}
+          maxLength={200}
+        />
+        <TouchableOpacity
+          onPress={sendRing}
+          disabled={sending || onCooldown}
+          activeOpacity={0.85}
+          style={[s.ringMainBtn, { backgroundColor: onCooldown ? palette.border : HEADER_STOPS.mid }]}
+        >
+          {sending ? <ActivityIndicator size="small" color="#fff" /> : <Bell size={18} color="#fff" />}
+          <Text style={s.ringMainText}>{onCooldown ? 'Ring sent — wait a minute' : `Ring about ${name}`}</Text>
+        </TouchableOpacity>
+      </View>
+    </KeyboardScreen>
+  );
+}
+
+/* ==================================================================== *
  * Thread
  * ==================================================================== */
 
 function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => void }) {
   const { accent } = useAccent();
   const insets = useSafeAreaInsets();
-  const { messages, loading, error, sending, send } = useChat();
+  const { user } = useAuth();
+  const myUserId = user?.id;
+  const {
+    messages,
+    reactions,
+    loading,
+    error,
+    sending,
+    send,
+    retry,
+    discard,
+    react,
+    agentTyping,
+    agentTypingName,
+    notifyTyping,
+    stopTyping,
+  } = useChat(myUserId);
+
+  // Long-press a message → the reaction pill (see ReactionOverlay).
+  const [actionTarget, setActionTarget] = useState<{ message: ChatMessage; rect: ActionRect } | null>(null);
+  const reactionsByMessage = useMemo(() => {
+    const map = new Map<number, TeamReaction[]>();
+    for (const r of reactions) {
+      const list = map.get(r.message_id);
+      if (list) list.push(r);
+      else map.set(r.message_id, [r]);
+    }
+    return map;
+  }, [reactions]);
+  // Stable identity — Bubble is React.memo, a fresh function per render would
+  // re-render every bubble on every keystroke.
+  const openActions = useCallback(
+    (m: ChatMessage, rect: ActionRect) => setActionTarget({ message: m, rect }),
+    [],
+  );
+
+  const onDraftChange = (text: string) => {
+    setDraft(text);
+    if (text.trim().length > 0) notifyTyping();
+    else stopTyping();
+  };
 
   const [draft, setDraft] = useState('');
   const [photo, setPhoto] = useState<ChatPhotoInput | null>(null);
@@ -252,6 +506,7 @@ function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => voi
   const toastFade = useRef(new Animated.Value(0)).current;
 
   const listRef = useRef<FlatList<Row>>(null);
+  const chatScroll = useChatScroll(listRef, true, undefined, messages.length > 0);
 
   // Visit picker IS genuinely scoped to the tapped site — useJobs already
   // supports siteId elsewhere in the app.
@@ -299,6 +554,8 @@ function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => voi
       body: `🔔 Ringing${about} — I'd like to talk to someone when you're free.`,
       photo: null,
       scheduleId: null,
+      siteId: site?.id ?? null,
+      siteName: site?.site_name ?? null,
     });
     setRinging(false);
     if (ok) {
@@ -308,19 +565,16 @@ function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => voi
     }
   };
 
-  const pickPhoto = async () => {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
-
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.7 });
-    if (result.canceled || !result.assets?.length) return;
-
-    const asset = result.assets[0];
-    setPhoto({ uri: asset.uri, name: asset.fileName ?? 'photo.jpg', mimeType: asset.mimeType ?? 'image/jpeg' });
-  };
+  const pickPhoto = () => promptChatPhotoSource(setPhoto);
 
   const onSend = async () => {
-    const ok = await send({ body: draft, photo, scheduleId: tagId });
+    const ok = await send({
+      body: draft,
+      photo,
+      scheduleId: tagId,
+      siteId: site?.id ?? null,
+      siteName: site?.site_name ?? null,
+    });
     if (!ok) return;
     setDraft('');
     setPhoto(null);
@@ -329,7 +583,7 @@ function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => voi
   };
 
   const canSend = (draft.trim().length > 0 || !!photo) && !sending;
-  const composerClearance = Math.max(insets.bottom, 10) + TAB_BAR_CLEARANCE;
+  const composerClearance = 10 + TAB_BAR_CLEARANCE;
 
   const ringScale = ringPulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.9] });
   const ringOpacity = ringPulse.interpolate({ inputRange: [0, 0.7, 1], outputRange: [0.4, 0.1, 0] });
@@ -338,64 +592,60 @@ function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => voi
   const headerColor = site ? colorFor(headerName, SITE_TINTS) : '#0f172a';
 
   return (
-    <KeyboardAvoidingView
-      style={s.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
-    >
-      <View pointerEvents="none" style={s.wash}>
-        <View style={[s.blob, { backgroundColor: '#dbeafe', top: -90, left: -70, width: 240, height: 240 }]} />
-        <View style={[s.blob, { backgroundColor: '#ede9fe', top: 200, right: -100, width: 240, height: 240 }]} />
-      </View>
+    <KeyboardScreen style={s.screen}>
+      <ChatBackground />
 
       {/* ── Header ───────────────────────────────────────────────── */}
-      <View style={s.threadHeader}>
+      <ChatHeaderBar>
         <TouchableOpacity onPress={onBack} style={s.backBtn} hitSlop={8}>
-          <ChevronLeft size={22} color={palette.ink} />
+          <ChevronLeft size={24} color="#fff" />
         </TouchableOpacity>
 
-        <View style={[s.threadAvatar, { backgroundColor: headerColor }]}>
+        <View style={[s.headerAvatar, { backgroundColor: headerColor }]}>
           {site ? (
-            <Text style={s.threadAvatarText}>{initial(headerName)}</Text>
+            <Text style={s.headerAvatarText}>{initial(headerName)}</Text>
           ) : (
-            <Users size={16} color="#fff" />
+            <Users size={18} color="#fff" />
           )}
         </View>
 
         <View style={{ flex: 1 }}>
-          <Text style={s.threadTitle} numberOfLines={1}>
+          <Text style={s.threadTitleOnColor} numberOfLines={1}>
             {headerName}
           </Text>
-          <View style={s.statusRow}>
-            <View style={[s.statusDot, { backgroundColor: isActive ? '#10b981' : palette.mutedLight }]} />
-            <Text style={s.statusText}>
-              {isActive ? 'Active now' : 'Away — ring to notify'}
-              {site ? ' · shared conversation' : ''}
+          {agentTyping ? (
+            <Text style={s.statusTextOnColor}>
+              {agentTypingName ? `${agentTypingName} is typing…` : 'Support is typing…'}
             </Text>
-          </View>
+          ) : (
+            <View style={s.statusRow}>
+              <View style={[s.statusDot, { backgroundColor: isActive ? '#4ade80' : 'rgba(255,255,255,0.5)' }]} />
+              <Text style={s.statusTextOnColor}>{isActive ? 'Active now' : 'Away — ring to notify'}</Text>
+            </View>
+          )}
         </View>
 
         <View style={s.ringSlot}>
           {ringing ? (
             <Animated.View
               pointerEvents="none"
-              style={[s.ringPulse, { backgroundColor: accent, opacity: ringOpacity, transform: [{ scale: ringScale }] }]}
+              style={[s.ringPulse, { backgroundColor: '#fff', opacity: ringOpacity, transform: [{ scale: ringScale }] }]}
             />
           ) : null}
           <TouchableOpacity
             onPress={ringSupport}
             disabled={ringing || ringOnCooldown}
             activeOpacity={0.8}
-            style={[s.ringBtn, { backgroundColor: ringOnCooldown ? '#f1f5f9' : `${accent}16` }]}
+            style={[s.ringBtn, { backgroundColor: ringOnCooldown ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.24)' }]}
           >
             {ringing ? (
-              <ActivityIndicator size="small" color={accent} />
+              <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <Bell size={18} color={ringOnCooldown ? palette.mutedLight : accent} />
+              <Bell size={19} color={ringOnCooldown ? 'rgba(255,255,255,0.5)' : '#fff'} />
             )}
           </TouchableOpacity>
         </View>
-      </View>
+      </ChatHeaderBar>
 
       {ringToast ? (
         <Animated.View style={[s.toast, { opacity: toastFade }]} pointerEvents="none">
@@ -434,10 +684,14 @@ function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => voi
           ref={listRef}
           data={rows}
           keyExtractor={(r) => r.key}
-          style={{ flex: 1 }}
+          style={[{ flex: 1 }, chatScroll.hiddenStyle]}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          onContentSizeChange={chatScroll.onContentSizeChange}
+          initialNumToRender={60}
+          maxToRenderPerBatch={60}
+          windowSize={31}
+          removeClippedSubviews={false}
           renderItem={({ item }) =>
             item.kind === 'separator' ? (
               <View style={s.daySep}>
@@ -446,11 +700,50 @@ function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => voi
                 <View style={s.daySepLine} />
               </View>
             ) : (
-              <Bubble message={item.message} accent={accent} showAvatar={item.showAvatar} showName={item.showName} />
+              <Bubble
+                message={item.message}
+                accent={accent}
+                showAvatar={item.showAvatar}
+                showName={item.showName}
+                myUserId={myUserId}
+                reactions={reactionsByMessage.get(item.message.id)}
+                onRetry={retry}
+                onDiscard={discard}
+                onActions={openActions}
+              />
             )
           }
         />
       )}
+
+      {actionTarget ? (
+        <ReactionOverlay
+          rect={actionTarget.rect}
+          accent={accent}
+          mine={isMine(actionTarget.message, myUserId)}
+          myEmoji={
+            reactions.find((r) => r.message_id === actionTarget.message.id && r.user_id === myUserId)?.emoji ?? null
+          }
+          renderMessage={() => (
+            <Bubble
+              message={actionTarget.message}
+              accent={accent}
+              showAvatar
+              showName
+              myUserId={myUserId}
+              reactions={reactionsByMessage.get(actionTarget.message.id)}
+              onRetry={() => {}}
+              onDiscard={() => {}}
+              onActions={() => {}}
+            />
+          )}
+          onReact={(emoji) => {
+            react(actionTarget.message.id, emoji);
+            setActionTarget(null);
+          }}
+          onClose={() => setActionTarget(null)}
+        />
+      ) : null}
 
       {/* ── Composer — WhatsApp-style rounded pill ──────────────────── */}
       <View style={[s.composerWrap, { paddingBottom: composerClearance }]}>
@@ -501,7 +794,7 @@ function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => voi
 
             <TextInput
               value={draft}
-              onChangeText={setDraft}
+              onChangeText={onDraftChange}
               placeholder="Message SoWash…"
               placeholderTextColor={palette.mutedLight}
               style={s.pillInput}
@@ -559,59 +852,226 @@ function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => voi
           </Pressable>
         </Pressable>
       </Modal>
-    </KeyboardAvoidingView>
+    </KeyboardScreen>
   );
 }
 
-function Bubble({
+const Bubble = React.memo(function Bubble({
   message,
   accent,
   showAvatar,
   showName,
+  myUserId,
+  reactions,
+  onRetry,
+  onDiscard,
+  onActions,
 }: {
   message: ChatMessage;
   accent: string;
   showAvatar: boolean;
   showName: boolean;
+  myUserId: number | undefined;
+  reactions?: TeamReaction[];
+  onRetry: (localId: number) => void;
+  onDiscard: (localId: number) => void;
+  onActions: (message: ChatMessage, rect: ActionRect) => void;
 }) {
-  const mine = message.sender_kind === 'customer';
-  const url = photoUrl(message.attachment_url);
+  const mine = isMine(message, myUserId);
+  const url = (message.pending || message.failed) && message.localPhotoUri ? message.localPhotoUri : photoUrl(message.attachment_url);
   const name = message.sender_name || 'SoWash';
+  const photoSize = usePhotoBubbleSize();
+  const rowRef = useRef<View>(null);
+  const hasReactions = !!reactions && reactions.length > 0;
+
+  const counts = (reactions ?? []).reduce<Record<string, number>>((acc, r) => {
+    acc[r.emoji] = (acc[r.emoji] ?? 0) + 1;
+    return acc;
+  }, {});
+  const myReaction = (reactions ?? []).find((r) => r.user_id === myUserId)?.emoji;
 
   return (
-    <View style={[s.bubbleLine, { justifyContent: mine ? 'flex-end' : 'flex-start' }]}>
-      {!mine ? (
-        showAvatar ? (
-          <View style={[s.avatar, { backgroundColor: colorFor(name, AVATAR_COLORS) }]}>
-            <Text style={s.avatarText}>{initial(name)}</Text>
+    <View ref={rowRef} collapsable={false}>
+      <View style={[s.bubbleLine, { justifyContent: mine ? 'flex-end' : 'flex-start', opacity: message.pending ? 0.6 : 1 }]}>
+        {!mine ? (
+          showAvatar ? (
+            <View style={[s.avatar, { backgroundColor: colorFor(name, AVATAR_COLORS) }]}>
+              <Text style={s.avatarText}>{initial(name)}</Text>
+            </View>
+          ) : (
+            <View style={s.avatarSpacer} />
+          )
+        ) : null}
+
+        <TouchableOpacity
+          activeOpacity={0.95}
+          // Local (negative-id) bubbles have no server id to react to yet.
+          onLongPress={
+            message.id > 0
+              ? () => rowRef.current?.measureInWindow((x, y, w, h) => onActions(message, { x, y, w, h }))
+              : undefined
+          }
+          delayLongPress={300}
+          style={[
+            s.bubble,
+            mine ? { backgroundColor: accent, borderBottomRightRadius: 6 } : [s.bubbleTheirs, { borderBottomLeftRadius: 6 }],
+            hasReactions ? { marginBottom: 14 } : null,
+          ]}
+        >
+          {mine ? (
+            <LinearGradient
+              pointerEvents="none"
+              colors={[shade(accent, 0.12), shade(accent, -0.14)]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={s.bubbleGradient}
+            />
+          ) : null}
+          {!mine && showName && message.sender_name ? (
+            <Text style={[s.sender, { color: accent }]}>{message.sender_name}</Text>
+          ) : null}
+
+          {message.site_name ? (
+            <View style={[s.siteChip, mine ? s.siteChipMine : s.siteChipTheirs]}>
+              <MapPin size={11} color={mine ? '#fff' : accent} />
+              <Text style={[s.siteChipText, { color: mine ? '#fff' : accent }]} numberOfLines={1}>
+                {message.site_name}
+              </Text>
+            </View>
+          ) : null}
+
+          {message.visit ? <ChatVisitCard visit={message.visit} mine={mine} /> : null}
+
+          {url ? <Image source={{ uri: url }} style={[s.photo, photoSize]} contentFit="cover" /> : null}
+
+          {message.body ? (
+            <Text style={[s.text, mine ? { color: '#fff' } : { color: palette.ink }]}>{message.body}</Text>
+          ) : null}
+
+          <View style={s.timeRow}>
+            <Text style={[s.time, { marginTop: 0, alignSelf: 'auto' }, mine ? { color: '#ffffffaa' } : { color: palette.mutedLight }]}>
+              {formatTime(message.created_at)}
+            </Text>
+            {message.failed ? (
+              <CircleAlert size={13} color="#ffd6d6" />
+            ) : message.pending ? (
+              <Clock size={12} color="#ffffffaa" />
+            ) : null}
           </View>
-        ) : (
-          <View style={s.avatarSpacer} />
-        )
-      ) : null}
 
-      <View
-        style={[
-          s.bubble,
-          mine ? { backgroundColor: accent, borderBottomRightRadius: 6 } : [s.bubbleTheirs, { borderBottomLeftRadius: 6 }],
-        ]}
-      >
-        {!mine && showName && message.sender_name ? (
-          <Text style={[s.sender, { color: accent }]}>{message.sender_name}</Text>
-        ) : null}
+          {hasReactions ? (
+            <View style={[s.reactionRow, mine ? { right: 10 } : { left: 10 }]}>
+              {Object.entries(counts).map(([emoji, count]) => (
+                <View
+                  key={emoji}
+                  style={[s.reactionChip, myReaction === emoji && { borderColor: accent, backgroundColor: accent + '14' }]}
+                >
+                  <Text style={s.reactionEmoji}>{emoji}</Text>
+                  {count > 1 ? <Text style={s.reactionCount}>{count}</Text> : null}
+                </View>
+              ))}
+            </View>
+          ) : null}
 
-        {message.visit ? <ChatVisitCard visit={message.visit} mine={mine} /> : null}
-
-        {url ? <Image source={{ uri: url }} style={s.photo} resizeMode="cover" /> : null}
-
-        {message.body ? (
-          <Text style={[s.text, mine ? { color: '#fff' } : { color: palette.ink }]}>{message.body}</Text>
-        ) : null}
-
-        <Text style={[s.time, mine ? { color: '#ffffffaa' } : { color: palette.mutedLight }]}>
-          {formatTime(message.created_at)}
-        </Text>
+          {message.failed ? (
+            <View style={s.failedRow}>
+              <Text style={s.failedText}>Not sent</Text>
+              <TouchableOpacity onPress={() => onRetry(message.id)} hitSlop={8}>
+                <Text style={s.failedAction}>Retry</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => onDiscard(message.id)} hitSlop={8}>
+                <Text style={s.failedAction}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+        </TouchableOpacity>
       </View>
+    </View>
+  );
+});
+
+/**
+ * Long-press menu: the page dims, the pressed message floats where it was,
+ * and a pill of quick reactions sits next to it. In-screen (not a Modal) —
+ * positions are converted from window coordinates using this view's own
+ * measured window origin. Same behaviour as the staff app's overlay in
+ * app/staff/chats.tsx, minus the "+" picker and Reply (not in this chat).
+ */
+function ReactionOverlay({
+  rect,
+  accent,
+  mine,
+  myEmoji,
+  renderMessage,
+  onReact,
+  onClose,
+}: {
+  rect: ActionRect;
+  accent: string;
+  mine: boolean;
+  myEmoji: string | null;
+  renderMessage: () => React.ReactNode;
+  onReact: (emoji: string) => void;
+  onClose: () => void;
+}) {
+  const rootRef = useRef<View>(null);
+  const [origin, setOrigin] = useState<{ x: number; y: number } | null>(null);
+  const pop = useRef(new Animated.Value(0)).current;
+  const emojiPops = useRef(QUICK_REACTIONS.map(() => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    Animated.spring(pop, { toValue: 1, useNativeDriver: true, bounciness: 8, speed: 18 }).start();
+    Animated.stagger(
+      35,
+      emojiPops.map((v) => Animated.spring(v, { toValue: 1, useNativeDriver: true, bounciness: 14, speed: 22 })),
+    ).start();
+  }, [pop, emojiPops]);
+
+  const PILL_H = 58;
+  let bubbleTop = 0;
+  let pillTop = 0;
+  if (origin) {
+    bubbleTop = rect.y - origin.y;
+    // Above the message when there's room, otherwise just below it.
+    pillTop = bubbleTop >= PILL_H + 16 ? bubbleTop - PILL_H - 8 : bubbleTop + rect.h + 8;
+  }
+
+  return (
+    <View
+      ref={rootRef}
+      collapsable={false}
+      style={s.actionOverlay}
+      onLayout={() => rootRef.current?.measureInWindow((x, y) => setOrigin({ x, y }))}
+    >
+      <TouchableOpacity style={s.actionBackdrop} activeOpacity={1} onPress={onClose} />
+
+      {origin ? (
+        <>
+          <View pointerEvents="none" style={{ position: 'absolute', left: rect.x - origin.x, top: bubbleTop, width: rect.w }}>
+            {renderMessage()}
+          </View>
+
+          <Animated.View
+            style={[
+              s.reactionPill,
+              mine ? { right: 12 } : { left: 12 },
+              { top: pillTop, opacity: pop, transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) }] },
+            ]}
+          >
+            {QUICK_REACTIONS.map((emoji, i) => (
+              <Animated.View key={emoji} style={{ transform: [{ scale: emojiPops[i] }] }}>
+                <TouchableOpacity
+                  style={[s.pillBtn, myEmoji === emoji && { backgroundColor: accent + '1f', borderColor: accent + '66' }]}
+                  activeOpacity={0.6}
+                  onPress={() => onReact(emoji)}
+                >
+                  <Text style={s.pillEmoji}>{emoji}</Text>
+                </TouchableOpacity>
+              </Animated.View>
+            ))}
+          </Animated.View>
+        </>
+      ) : null}
     </View>
   );
 }
@@ -631,7 +1091,15 @@ const s = StyleSheet.create({
   wash: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   blob: { position: 'absolute', borderRadius: 999, opacity: 0.5 },
 
-  // Site list header
+  // Coloured list / thread headers (see ChatHeaderBar)
+  listTitle: { fontSize: 26, fontWeight: '900', color: '#fff' },
+  listSub: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.95)' },
+  headerAvatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.6)' },
+  headerAvatarText: { color: '#fff', fontSize: 16, fontWeight: '900' },
+  threadTitleOnColor: { fontSize: 17, fontWeight: '900', color: '#fff' },
+  statusTextOnColor: { fontSize: 12, fontWeight: '600', color: 'rgba(255,255,255,0.95)' },
+
+  // Site list header (legacy, unused now)
   header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 6 },
   title: { fontSize: 24, fontWeight: '900', color: palette.ink },
   headerSub: { fontSize: 12.5, fontWeight: '600', color: palette.mutedLight, marginTop: 3 },
@@ -647,7 +1115,7 @@ const s = StyleSheet.create({
     marginBottom: 2,
     ...CARD_SHADOW,
   },
-  siteAvatar: { width: 44, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  siteAvatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   siteAvatarText: { color: '#fff', fontSize: 16, fontWeight: '900' },
   siteName: { fontSize: 14.5, fontWeight: '800', color: palette.ink },
   siteSub: { fontSize: 12, fontWeight: '600', color: palette.mutedLight, marginTop: 2 },
@@ -721,14 +1189,125 @@ const s = StyleSheet.create({
   avatarText: { color: '#fff', fontSize: 12, fontWeight: '900' },
   avatarSpacer: { width: AVATAR, marginBottom: 2 },
 
-  bubble: { maxWidth: '78%', borderRadius: 20, padding: 12 },
+  bubble: {
+    maxWidth: '80%',
+    borderRadius: 22,
+    paddingVertical: 10,
+    paddingHorizontal: 13,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
+  },
   bubbleTheirs: { backgroundColor: '#fff', ...CARD_SHADOW },
   sender: { fontSize: 11, fontWeight: '800', marginBottom: 3 },
-  text: { fontSize: 14, lineHeight: 20 },
+  text: { fontSize: 14.5, lineHeight: 21 },
   time: { fontSize: 10.5, fontWeight: '600', marginTop: 4, alignSelf: 'flex-end' },
   photo: { width: 200, height: 150, borderRadius: 14, marginBottom: 6 },
+  bubbleGradient: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 22 },
+  timeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 },
+  siteChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 4,
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    marginBottom: 6,
+    maxWidth: '100%',
+  },
+  siteChipMine: { backgroundColor: 'rgba(255,255,255,0.2)' },
+  siteChipTheirs: { backgroundColor: 'rgba(0,0,0,0.05)' },
+  siteChipText: { fontSize: 11, fontWeight: '800', flexShrink: 1 },
+
+  // Reaction chips straddle the bubble's bottom edge (the bubble reserves
+  // 14px for them); the chip border is the screen background so it reads as
+  // notched out of the bubble.
+  reactionRow: { position: 'absolute', bottom: -15, flexDirection: 'row', gap: 4 },
+  reactionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#fff',
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: '#f6f8ff',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    elevation: 1,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.14,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  reactionEmoji: { fontSize: 14, lineHeight: 19 },
+  reactionCount: { fontSize: 11, fontWeight: '800', color: palette.muted },
+  actionOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 30, elevation: 30 },
+  actionBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#0b121ccc' },
+  reactionPill: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 58,
+    backgroundColor: '#fff',
+    borderRadius: 29,
+    paddingHorizontal: 8,
+    gap: 2,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  pillBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pillEmoji: { fontSize: 28, lineHeight: 34 },
+  failedRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 6 },
+  failedText: { fontSize: 11.5, fontWeight: '700', color: '#ffd6d6' },
+  failedAction: { fontSize: 12, fontWeight: '800', color: '#fff', textDecorationLine: 'underline' },
   // The visit tag's styling lives in src/components/ChatVisitCard.tsx — it is
   // a preview card now, not a chip.
+
+  // Site screen (ring history)
+  ringList: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 12, gap: 8 },
+  ringCard: { backgroundColor: '#fff', borderRadius: 16, padding: 12, ...CARD_SHADOW },
+  ringCardTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  ringCardTime: { flex: 1, fontSize: 13, fontWeight: '800', color: palette.ink },
+  ringPill: { borderRadius: 10, paddingHorizontal: 9, paddingVertical: 3 },
+  ringPillText: { fontSize: 11.5, fontWeight: '800' },
+  ringCardNote: { fontSize: 13.5, color: palette.ink, marginTop: 8, lineHeight: 19 },
+  ringCardSub: { fontSize: 12, fontWeight: '600', color: palette.muted, marginTop: 6 },
+  generalLink: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16 },
+  generalLinkText: { fontSize: 13, fontWeight: '800' },
+  ringComposer: { paddingHorizontal: 14, paddingTop: 8, gap: 8 },
+  ringNoteInput: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontSize: 14.5,
+    color: palette.ink,
+  },
+  ringMainBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    borderRadius: 16,
+    paddingVertical: 15,
+  },
+  ringMainText: { color: '#fff', fontSize: 15, fontWeight: '800' },
 
   composerWrap: { paddingHorizontal: 12, paddingTop: 8 },
   sendError: { fontSize: 12, color: palette.danger, marginBottom: 6, paddingHorizontal: 6 },
@@ -755,12 +1334,15 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 16,
-    paddingLeft: 4,
-    paddingRight: 6,
-    minHeight: 46,
+    borderRadius: 26,
+    paddingLeft: 6,
+    paddingRight: 8,
+    minHeight: 50,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
   },
   pillIcon: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
   pillInput: {
@@ -772,9 +1354,9 @@ const s = StyleSheet.create({
     paddingHorizontal: 2,
   },
   sendBtn: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#0f172a',

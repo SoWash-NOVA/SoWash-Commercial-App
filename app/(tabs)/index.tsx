@@ -87,6 +87,7 @@ import { useAuth } from '../../src/auth/AuthContext';
 import { useSiteContext } from '../../src/site-context';
 import { useJobs, useStats, useUnreadCount, formatDateOnly, relativeDay } from '../../src/hooks';
 import { SiteSwitcher } from '../../src/components/SiteSwitcher';
+import PageHeader from '../../src/components/PageHeader';
 
 /* ------------------------------------------------------------------ *
  * Tile colours — fixed per-metric, same convention as the customer app's
@@ -264,24 +265,13 @@ export default function OverviewScreen() {
         <View style={[s.blob, { backgroundColor: '#fce7f3', bottom: -60, left: -40, width: 260, height: 260 }]} />
       </View>
 
-      <ScrollView
-        contentContainerStyle={s.scroll}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accentColor} />
-        }
-      >
-        <View style={s.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.greeting}>{user?.firstName ? `${greeting()} ${user.firstName}` : greeting()}</Text>
-            <Text style={s.client} numberOfLines={2}>
-              {clientName || 'Your account'}
-            </Text>
-          </View>
-
-          {/* The badge is a plain dot, not a count. Two notifications per
-              visit means a number would read "1" almost always, and a dot
-              survives the case where the poll is stale. */}
+      <PageHeader
+        title={user?.firstName ? `${greeting()} ${user.firstName}` : greeting()}
+        subtitle={clientName || 'Your account'}
+        right={
+          /* The badge is a plain dot, not a count. Two notifications per
+             visit means a number would read "1" almost always, and a dot
+             survives the case where the poll is stale. */
           <TouchableOpacity
             onPress={() => router.push('/notifications')}
             style={s.bellBtn}
@@ -291,12 +281,18 @@ export default function OverviewScreen() {
             <Bell size={18} color={palette.inkSoft} />
             {unread > 0 ? <View style={[s.bellDot, { backgroundColor: accentColor }]} /> : null}
           </TouchableOpacity>
-        </View>
+        }
+      >
+        <SiteSwitcher />
+      </PageHeader>
 
-        <View style={{ marginTop: 14, marginBottom: 4 }}>
-          <SiteSwitcher />
-        </View>
-
+      <ScrollView
+        contentContainerStyle={s.scroll}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accentColor} />
+        }
+      >
         {/* ── Next visit + live weather ──────────────────────────────── */}
         <View style={s.topRow}>
           <View style={s.topRowMain}>

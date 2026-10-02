@@ -40,6 +40,7 @@ import { useAuth, initialsOf } from '../../src/auth/AuthContext';
 import { useClient, formatDateOnly, formatSystemSize } from '../../src/hooks';
 import { useSiteContext } from '../../src/site-context';
 import { PRIVACY_EMAIL } from '../../src/contact';
+import PageHeader from '../../src/components/PageHeader';
 
 /** Accent options, matching the residential app's picker. Teal leads here. */
 const ACCENTS = ['#0F766E', '#2E6BFF', '#7C3AED', '#B45309', '#BE123C'];
@@ -104,6 +105,8 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.screen}>
+      <PageHeader title="Account" subtitle={clientName || c?.client_name || undefined} />
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}

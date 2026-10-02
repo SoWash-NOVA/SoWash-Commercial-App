@@ -25,6 +25,7 @@ import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useJobs, formatDateOnly, relativeDay } from '../../src/hooks';
 import { JobSummary } from '../../src/api/types';
+import PageHeader from '../../src/components/PageHeader';
 
 export default function SiteSldScreen() {
   const router = useRouter();
@@ -39,15 +40,7 @@ export default function SiteSldScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.stubHeader}>
-        <TouchableOpacity
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/documentation' as never))}
-          style={styles.stubBackBtn}
-        >
-          <ChevronLeft size={20} color={palette.inkSoft} />
-        </TouchableOpacity>
-        <Text style={styles.stubTitle}>Site SLD</Text>
-      </View>
+      <PageHeader title="Site SLD" onBack={() => (router.canGoBack() ? router.back() : router.replace('/documentation' as never))} />
 
       {loading && !data ? (
         <View style={local.centre}>

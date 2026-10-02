@@ -22,6 +22,7 @@ import { useRouter } from 'expo-router';
 import { ChevronLeft, ChevronRight, Footprints, Megaphone, ShieldCheck, Wrench } from 'lucide-react-native';
 import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
+import PageHeader from '../../src/components/PageHeader';
 
 const ITEMS: {
   key: string;
@@ -66,15 +67,7 @@ export default function DocumentationScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.stubHeader}>
-        <TouchableOpacity
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
-          style={styles.stubBackBtn}
-        >
-          <ChevronLeft size={20} color={palette.inkSoft} />
-        </TouchableOpacity>
-        <Text style={styles.stubTitle}>Documentation</Text>
-      </View>
+      <PageHeader title="Documentation" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
 
       <ScrollView contentContainerStyle={local.list} showsVerticalScrollIndicator={false}>
         {ITEMS.map(({ key, title, sub, Icon, route }) => (

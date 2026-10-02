@@ -9,10 +9,19 @@
 // OTP first. There is no Firebase here at all, so nothing in this file needs a
 // Platform guard and the whole app works in `expo start --web`.
 //
-// The backend refuses to issue a token to anything that is not a `users` row
-// with "Type" = 'customer' and a client_id, so a staff member entering valid
-// credentials gets a 403 with a readable message rather than a broken session.
-// See routes/portalAuthRoutes.js and middleware/portalAuth.js.
+// Phase 1 (sowash-backend routes/portalAuthRoutes.js) widened this: a `users`
+// row with "Type" = 'customer' still gets the client-scoped session described
+// above, but "Type" one of OFFICE_ROLES below now ALSO signs in through this
+// same endpoint and gets an office/staff session instead (kind:'office_portal'
+// on the backend — see middleware/officePortalAuth.js there). appRole below is
+// how the rest of the app tells the two apart; app/_layout.tsx routes on it.
+//
+// A staff user has no client_id, so GET /customer-portal/customer/profile (the
+// client-only endpoint this file uses to validate a restored session and fetch
+// the header's client name) is meaningless for them and would 403. Every place
+// below that calls it is therefore guarded on appRole — see the comments at
+// each call site. Nothing about the CUSTOMER path changes: same calls, same
+// order, same error handling as before Phase 1.
 
 import React, {
   createContext,
@@ -29,10 +38,30 @@ import { LoginResponse, PortalUser, ProfileResponse } from '../api/types';
 
 export type AuthStatus = 'loading' | 'signedOut' | 'signedIn';
 
+/** 'client' = a commercial_clients site manager. 'staff' = an office user. */
+export type AppRole = 'client' | 'staff';
+
+/**
+ * Must stay in step with OFFICE_ROLES in sowash-backend
+ * config/staffRoles.js (STAFF_ROLES, which officePortalAuth.js's OFFICE_ROLES
+ * imports) — this is the client-side mirror of that
+ * login-time gate, used only to route within the app (the backend is what
+ * actually enforces it). Compared case-insensitively, matching the backend's
+ * own comparison, since users."Type" is free-text varchar.
+ */
+const OFFICE_ROLES = ['ci_admin', 'operations', 'admin', 'sales', 'accounts'];
+
+export function appRoleOf(user: PortalUser | null): AppRole | null {
+  if (!user) return null;
+  const role = String(user.role || '').trim().toLowerCase();
+  return OFFICE_ROLES.includes(role) ? 'staff' : 'client';
+}
+
 interface AuthContextValue {
   status: AuthStatus;
   user: PortalUser | null;
-  /** commercial_clients.client_name, resolved on restore/sign-in for the header. */
+  appRole: AppRole | null;
+  /** commercial_clients.client_name, resolved on restore/sign-in for the header. Client sessions only — always null for staff. */
   clientName: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -87,6 +116,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * On a network failure we deliberately keep the session rather than bouncing
    * to login. A site manager opening the app in a basement with no signal
    * should not be signed out; the axios interceptor handles a real 401.
+   *
+   * STAFF SESSIONS SKIP ALL OF THIS. /customer/profile is client-scoped (it
+   * 403s for a client_id-less staff user), so there is nothing useful for a
+   * staff session to validate against here — the token is trusted as-is, same
+   * as the offline fallback below already trusts it for a client session. A
+   * real 401/403 on an actually-expired staff token still gets caught the
+   * normal way, by the axios response interceptor in src/api/client.ts the
+   * first time the staff screens make a real request.
    */
   useEffect(() => {
     let cancelled = false;
@@ -102,6 +139,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // network call below is in flight.
       const cached = await readStoredUser();
       if (!cancelled && cached) setUser(cached);
+
+      if (appRoleOf(cached) === 'staff') {
+        if (!cancelled) setStatus('signedIn');
+        return;
+      }
+
+      // Client session with a cached identity: open the app NOW and validate
+      // the token in the background. Previously every cold start sat on a
+      // full-screen spinner for a whole network round trip even when the
+      // stored token was perfectly fine (the overwhelmingly common case).
+      // Only a real 401/403 below still bounces to /login — exactly as
+      // before, just a moment later — and an offline start no longer waits
+      // out a request timeout before showing anything. With NO cached
+      // identity (an install from before it was cached) we keep the old
+      // wait-for-the-server behaviour, since there'd be nothing to paint.
+      if (!cancelled && cached) setStatus('signedIn');
 
       try {
         const { data } = await api.get<ProfileResponse>('customer-portal/customer/profile');
@@ -142,6 +195,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await writeStoredUser(data.user ?? null);
       setUser(data.user ?? null);
 
+      // Staff sign-in: no client, so no client profile to fetch — see the
+      // restore-effect comment above for why /customer/profile is skipped.
+      if (appRoleOf(data.user ?? null) === 'staff') {
+        setClientName(null);
+        setStatus('signedIn');
+        return;
+      }
+
       // Best effort — a failure here must not block a successful sign-in.
       try {
         const { data: profile } = await api.get<ProfileResponse>(
@@ -169,9 +230,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('signedOut');
   }, []);
 
+  const appRole = useMemo(() => appRoleOf(user), [user]);
+
   const value = useMemo(
-    () => ({ status, user, clientName, signIn, signOut }),
-    [status, user, clientName, signIn, signOut],
+    () => ({ status, user, appRole, clientName, signIn, signOut }),
+    [status, user, appRole, clientName, signIn, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

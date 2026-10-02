@@ -14,7 +14,7 @@
 // SiteProvider. Every card shows its own site name instead.
 
 import React from 'react';
-import { View, Text, Image, FlatList, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CalendarDays, ChevronLeft, CircleAlert, Megaphone } from 'lucide-react-native';
 import { styles, palette } from '../../src/theme';
@@ -22,6 +22,8 @@ import { useAccent } from '../../src/theme-context';
 import { useTbtPhotos, formatDateOnly, formatDateTime } from '../../src/hooks';
 import { photoUrl } from '../../src/api/client';
 import { TbtJob } from '../../src/api/types';
+import PageHeader from '../../src/components/PageHeader';
+import { PhotoThumb } from '../../src/components/PhotoStripList';
 
 export default function TbtScreen() {
   const router = useRouter();
@@ -32,15 +34,7 @@ export default function TbtScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.stubHeader}>
-        <TouchableOpacity
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/documentation' as never))}
-          style={styles.stubBackBtn}
-        >
-          <ChevronLeft size={20} color={palette.inkSoft} />
-        </TouchableOpacity>
-        <Text style={styles.stubTitle}>TBT</Text>
-      </View>
+      <PageHeader title="TBT" onBack={() => (router.canGoBack() ? router.back() : router.replace('/documentation' as never))} />
 
       {loading && !data ? (
         <View style={local.centre}>
@@ -53,6 +47,10 @@ export default function TbtScreen() {
           contentContainerStyle={local.list}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={accent} />}
+          initialNumToRender={4}
+          maxToRenderPerBatch={4}
+          windowSize={7}
+          removeClippedSubviews
           renderItem={({ item }) => <TbtJobCard job={item} />}
           ListEmptyComponent={
             <View style={local.empty}>
@@ -94,13 +92,24 @@ function TbtJobCard({ job }: { job: TbtJob }) {
         </Text>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={local.strip}>
-        {job.photos.map((p) => {
+      <FlatList
+        horizontal
+        data={job.photos}
+        keyExtractor={(p) => p.id}
+        style={{ marginTop: 12, flexGrow: 0 }}
+        showsHorizontalScrollIndicator={false}
+        initialNumToRender={3}
+        maxToRenderPerBatch={3}
+        windowSize={3}
+        removeClippedSubviews
+        nestedScrollEnabled
+        ItemSeparatorComponent={() => <View style={{ width: 10 }} />}
+        renderItem={({ item: p, index }) => {
           const uri = photoUrl(p.photo_url);
           return (
-            <View key={p.id} style={local.thumbWrap}>
+            <View style={local.thumbWrap}>
               {uri ? (
-                <Image source={{ uri }} style={local.thumb} resizeMode="cover" />
+                <PhotoThumb url={uri} width={84} height={84} radius={14} priority={index < 3 ? 'high' : 'low'} />
               ) : (
                 <View style={[local.thumb, local.thumbPlaceholder]}>
                   <Megaphone size={18} color={palette.mutedLight} />
@@ -111,8 +120,8 @@ function TbtJobCard({ job }: { job: TbtJob }) {
               </Text>
             </View>
           );
-        })}
-      </ScrollView>
+        }}
+      />
     </View>
   );
 }

@@ -27,14 +27,15 @@ import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
-  Image,
   Modal,
   Pressable,
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   StyleSheet,
+  useWindowDimensions,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { CalendarDays, ChevronRight, CircleAlert, Images, X } from 'lucide-react-native';
 import { palette, styles as shared } from '../theme';
@@ -44,8 +45,20 @@ import { ChatVisitTag } from '../api/types';
 import { useJobDetail, useSldWalkthrough, sldHasWalk, formatDateOnly, statusMeta } from '../hooks';
 import JobDetailBody, { detailStyles } from './JobDetailBody';
 
-const CARD_WIDTH = 238;
 const GAP = 2;
+
+/**
+ * The card lives inside a chat bubble capped at ~78% of screen width (see
+ * `s.bubble` in app/staff/chats.tsx and app/(tabs)/support.tsx) — clamped so
+ * it never asks a small phone's bubble for more room than it has, and
+ * doesn't look like a postage stamp on a tablet. 238 (the old hardcoded
+ * value) sits right in the middle of this range on a typical ~375-412dp
+ * phone, so nothing changes visually for the common case.
+ */
+function useCardWidth(): number {
+  const { width } = useWindowDimensions();
+  return Math.min(280, Math.max(200, width * 0.62));
+}
 
 interface Props {
   visit: ChatVisitTag;
@@ -56,6 +69,7 @@ interface Props {
 export default function ChatVisitCard({ visit, mine }: Props) {
   const { accent } = useAccent();
   const [open, setOpen] = useState(false);
+  const cardWidth = useCardWidth();
 
   const meta = statusMeta(visit.status);
   const photos = visit.photos ?? [];
@@ -77,11 +91,12 @@ export default function ChatVisitCard({ visit, mine }: Props) {
         disabled={!canOpen}
         style={({ pressed }) => [
           local.card,
+          { width: cardWidth },
           mine ? local.cardMine : local.cardTheirs,
           pressed && canOpen ? { opacity: 0.85 } : null,
         ]}
       >
-        <PhotoStrip photos={photos} extra={extra} />
+        <PhotoStrip photos={photos} extra={extra} cardWidth={cardWidth} />
 
         <View style={local.body}>
           <View style={local.topRow}>
@@ -156,7 +171,7 @@ const isFinished = (status: string | null | undefined) =>
  * counting, so a visit with eleven photos reads "+7" rather than pretending it
  * has four.
  */
-function PhotoStrip({ photos, extra }: { photos: string[]; extra: number }) {
+function PhotoStrip({ photos, extra, cardWidth }: { photos: string[]; extra: number; cardWidth: number }) {
   const uris = useMemo(
     () => photos.map(photoUrl).filter((u): u is string => !!u),
     [photos],
@@ -173,12 +188,12 @@ function PhotoStrip({ photos, extra }: { photos: string[]; extra: number }) {
       {uris.map((uri, i) => {
         const last = i === uris.length - 1;
         const width = grid
-          ? (CARD_WIDTH - GAP) / 2
-          : (CARD_WIDTH - GAP * (n - 1)) / n;
+          ? (cardWidth - GAP) / 2
+          : (cardWidth - GAP * (n - 1)) / n;
 
         return (
           <View key={`${uri}-${i}`} style={{ width, height: rowHeight }}>
-            <Image source={{ uri }} style={local.thumb} resizeMode="cover" />
+            <Image source={{ uri }} style={local.thumb} contentFit="cover" />
             {last && extra > 0 ? (
               <View style={local.more}>
                 <Text style={local.moreText}>+{extra}</Text>
@@ -221,8 +236,11 @@ function VisitDetailSheet({
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={local.backdrop} onPress={onClose}>
-        <Pressable style={local.sheet} onPress={(e) => e.stopPropagation()}>
+      {/* The backdrop tap is a SIBLING behind the sheet, not a Pressable wrapped around it: a Pressable
+          around a ScrollView competes for the gesture and makes scrolling feel sticky on Android. */}
+      <View style={local.backdrop}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <View style={local.sheet}>
           <View style={local.sheetHead}>
             <View style={{ flex: 1 }}>
               <Text style={local.sheetTitle} numberOfLines={1}>
@@ -252,6 +270,7 @@ function VisitDetailSheet({
             <ScrollView
               contentContainerStyle={shared.scrollContent}
               showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
             >
               <JobDetailBody
                 job={job}
@@ -269,14 +288,14 @@ function VisitDetailSheet({
               />
             </ScrollView>
           )}
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
 
 const local = StyleSheet.create({
-  card: { width: CARD_WIDTH, borderRadius: 14, overflow: 'hidden', marginBottom: 6 },
+  card: { borderRadius: 14, overflow: 'hidden', marginBottom: 6 },
   cardMine: { backgroundColor: '#ffffff26' },
   cardTheirs: { backgroundColor: palette.bg, borderWidth: 1, borderColor: palette.borderSubtle },
 

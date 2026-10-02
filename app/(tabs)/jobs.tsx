@@ -73,6 +73,7 @@ import { useJobs, formatDateOnly } from '../../src/hooks';
 import { JobScope } from '../../src/api/types';
 import { SiteSwitcher } from '../../src/components/SiteSwitcher';
 import { JobCard } from '../../src/components/JobCard';
+import PageHeader from '../../src/components/PageHeader';
 
 const GREEN = '#10b981';
 
@@ -178,12 +179,20 @@ export default function JobsScreen() {
         <View style={[s.blob, { backgroundColor: '#fce7f3', top: 240, right: -100, width: 260, height: 260 }]} />
       </View>
 
+      <PageHeader title="Visits">
+        <SiteSwitcher />
+      </PageHeader>
+
       {loading && !data ? (
         <View style={s.centre}>
           <ActivityIndicator size="large" color={accent} />
         </View>
       ) : (
         <FlatList
+          initialNumToRender={8}
+          maxToRenderPerBatch={6}
+          windowSize={7}
+          removeClippedSubviews
           data={jobs}
           keyExtractor={(j) => String(j.schedule_id)}
           style={{ flex: 1 }}
@@ -197,11 +206,6 @@ export default function JobsScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accent} />}
           ListHeaderComponent={
             <View>
-              <Text style={s.title}>Visits</Text>
-              <View style={{ marginTop: 14 }}>
-                <SiteSwitcher />
-              </View>
-
               {/* ── Last visit ─────────────────────────────────────────── */}
               <Text style={s.sectionTitle}>LAST VISIT</Text>
               {last.loading && !last.data ? (

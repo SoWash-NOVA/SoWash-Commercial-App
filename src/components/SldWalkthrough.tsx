@@ -207,12 +207,15 @@ export default function SldWalkthrough({ diagram, points, siteName, onExit }: Pr
   }, [diagramUri]);
 
   /** Warm the cache so stepping between points never shows an empty frame. */
+  // Only the current point and its neighbours — prefetching every photo at once
+  // made them all crawl together on a slow connection.
   useEffect(() => {
-    walk.forEach((p) => {
+    for (let i = Math.max(0, idx - 1); i <= Math.min(walk.length - 1, idx + 2); i++) {
+      const p = walk[i];
       if (p.beforeUrl) Image.prefetch(p.beforeUrl).catch(() => {});
       if (p.afterUrl) Image.prefetch(p.afterUrl).catch(() => {});
-    });
-  }, [walk]);
+    }
+  }, [walk, idx]);
 
   /** One pulse loop for all pins — N looping animations would be N too many. */
   useEffect(() => {

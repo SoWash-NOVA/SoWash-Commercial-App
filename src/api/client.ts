@@ -15,6 +15,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
+import { dataCache } from '../dataCache';
 
 // NO trailing /api — photo paths get prefixed with this. Repeating /api is the
 // classic bug in this codebase.
@@ -35,10 +36,12 @@ export async function getToken(): Promise<string | null> {
 }
 
 export async function setToken(token: string): Promise<void> {
+  dataCache.clear(); // a new session must never see the previous account's cached screens
   await SecureStore.setItemAsync(TOKEN_KEY, token);
 }
 
 export async function clearToken(): Promise<void> {
+  dataCache.clear();
   try {
     await SecureStore.deleteItemAsync(TOKEN_KEY);
   } catch {

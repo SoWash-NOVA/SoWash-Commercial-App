@@ -35,6 +35,7 @@ import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useMaintenance, useMaintenanceStats, formatDateOnly, relativeDay, statusMeta } from '../../src/hooks';
 import { MaintenanceJob } from '../../src/api/types';
+import PageHeader from '../../src/components/PageHeader';
 
 const FILTERS = [
   { key: 'all', label: 'ALL' },
@@ -54,15 +55,7 @@ export default function MaintenanceScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.stubHeader}>
-        <TouchableOpacity
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
-          style={styles.stubBackBtn}
-        >
-          <ChevronLeft size={20} color={palette.inkSoft} />
-        </TouchableOpacity>
-        <Text style={styles.stubTitle}>Maintenance</Text>
-      </View>
+      <PageHeader title="Maintenance" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
 
       <View style={local.header}>
         <View style={local.kpiRow}>
@@ -96,6 +89,10 @@ export default function MaintenanceScreen() {
         </View>
       ) : (
         <FlatList
+          initialNumToRender={8}
+          maxToRenderPerBatch={6}
+          windowSize={7}
+          removeClippedSubviews
           data={jobs}
           keyExtractor={(j) => String(j.id)}
           contentContainerStyle={local.list}

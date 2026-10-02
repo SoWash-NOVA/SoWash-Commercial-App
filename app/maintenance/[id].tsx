@@ -8,11 +8,11 @@
 // the client's alphabetically-first site, not the one the work happened at.
 
 import React from 'react';
+import { PhotoThumb } from '../../src/components/PhotoStripList';
 import {
   View,
   Text,
   ScrollView,
-  Image,
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
@@ -25,6 +25,7 @@ import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useMaintenanceDetail, formatDateOnly, formatDateTime, statusMeta } from '../../src/hooks';
 import { photoUrl } from '../../src/api/client';
+import PageHeader from '../../src/components/PageHeader';
 
 export default function MaintenanceDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -40,15 +41,7 @@ export default function MaintenanceDetailScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.stubHeader}>
-        <TouchableOpacity
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/maintenance'))}
-          style={styles.stubBackBtn}
-        >
-          <ChevronLeft size={20} color={palette.inkSoft} />
-        </TouchableOpacity>
-        <Text style={styles.stubTitle}>Maintenance task</Text>
-      </View>
+      <PageHeader title="Maintenance task" onBack={() => (router.canGoBack() ? router.back() : router.replace('/maintenance'))} />
 
       {loading && !data ? (
         <View style={local.centre}>
@@ -155,11 +148,7 @@ function Shot({
 }) {
   return (
     <View style={{ width }}>
-      <Image
-        source={{ uri }}
-        style={{ width, height: width * 0.75, borderRadius: 14, backgroundColor: '#f1f5f9' }}
-        resizeMode="cover"
-      />
+      <PhotoThumb url={uri} width={width} height={width * 0.75} radius={14} />
       <Text style={local.shotLabel}>{label}</Text>
       <Text style={local.shotMeta}>{at ? formatDateTime(at) : '—'}</Text>
     </View>

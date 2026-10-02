@@ -28,11 +28,11 @@ import {
   View,
   Text,
   ScrollView,
-  Image,
   TouchableOpacity,
   useWindowDimensions,
   StyleSheet,
 } from 'react-native';
+import { Image } from 'expo-image';
 import {
   CalendarDays,
   ChevronRight,
@@ -47,6 +47,7 @@ import { styles, palette } from '../theme';
 // under the provider, and the screen used to pass it through two layers.
 import { useAccent } from '../theme-context';
 import { photoUrls } from '../api/client';
+import { PhotoStripList, PhotoStripSkeleton, useAfterOpen } from './PhotoStripList';
 import { JobDetail } from '../api/types';
 import { formatDateOnly, formatDateTime, statusMeta, stageIndex, STAGES } from '../hooks';
 
@@ -197,6 +198,9 @@ function WalkCard({ count, onPress }: { count: number; onPress: () => void }) {
 function Photos({ job }: { job: JobDetail }) {
   const before = photoUrls(job.before_photos);
   const after = photoUrls(job.after_photos);
+  // Text first, photos a beat later — so opening the report (or its popup) isn't competing with a
+  // pile of downloads and decodes while it animates in. See src/components/PhotoStripList.tsx.
+  const ready = useAfterOpen(160);
 
   if (before.length === 0 && after.length === 0) {
     return (
@@ -212,17 +216,28 @@ function Photos({ job }: { job: JobDetail }) {
     <View style={[styles.card, { marginTop: 16 }]}>
       <Text style={[styles.cardTitle, { marginBottom: 12 }]}>PHOTOS</Text>
       {before.length > 0 ? (
-        <PhotoStrip title="Before" urls={before} at={job.before_photos_at} />
+        <PhotoStrip title="Before" urls={before} at={job.before_photos_at} ready={ready} />
       ) : null}
-      {after.length > 0 ? <PhotoStrip title="After" urls={after} at={job.after_photos_at} /> : null}
+      {after.length > 0 ? <PhotoStrip title="After" urls={after} at={job.after_photos_at} ready={ready} /> : null}
     </View>
   );
 }
 
-function PhotoStrip({ title, urls, at }: { title: string; urls: string[]; at: string | null }) {
+function PhotoStrip({
+  title,
+  urls,
+  at,
+  ready,
+}: {
+  title: string;
+  urls: string[];
+  at: string | null;
+  ready: boolean;
+}) {
   const { width } = useWindowDimensions();
   // Two-up on a phone, leaving room for the card padding and the gap.
   const size = Math.max(120, (width - 40 - 40 - 10) / 2);
+  const height = size * 0.75;
 
   return (
     <View style={{ marginBottom: 14 }}>
@@ -232,16 +247,13 @@ function PhotoStrip({ title, urls, at }: { title: string; urls: string[]; at: st
           {urls.length} · {at ? formatDateTime(at) : '—'}
         </Text>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
-        {urls.map((url) => (
-          <Image
-            key={url}
-            source={{ uri: url }}
-            style={{ width: size, height: size * 0.75, borderRadius: 14, backgroundColor: '#f1f5f9' }}
-            resizeMode="cover"
-          />
-        ))}
-      </ScrollView>
+      {/* Virtualised: only the photos on/near the screen load; the first two get priority;
+          a failed one shows tap-to-retry. */}
+      {ready ? (
+        <PhotoStripList urls={urls} width={size} height={height} gap={10} radius={14} />
+      ) : (
+        <PhotoStripSkeleton width={size} height={height} radius={14} />
+      )}
     </View>
   );
 }

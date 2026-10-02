@@ -24,6 +24,7 @@ import { useAccent } from '../../src/theme-context';
 import { useSiteContext, siteLocation } from '../../src/site-context';
 import { formatSystemSize } from '../../src/hooks';
 import { Site } from '../../src/api/types';
+import PageHeader from '../../src/components/PageHeader';
 
 const TINTS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#f97316', '#06b6d4', '#ef4444', '#14b8a6'];
 
@@ -69,6 +70,15 @@ export default function SitesScreen() {
         <View style={[s.blob, { backgroundColor: '#fce7f3', top: 260, right: -100, width: 260, height: 260 }]} />
       </View>
 
+      <PageHeader
+        title="Sites"
+        subtitle={
+          sites.length === 0
+            ? 'No sites on this account'
+            : `${sites.length} site${sites.length === 1 ? '' : 's'} on this account`
+        }
+      />
+
       <FlatList
         data={sites}
         keyExtractor={(item) => String(item.id)}
@@ -76,16 +86,6 @@ export default function SitesScreen() {
         contentContainerStyle={s.list}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accent} />}
-        ListHeaderComponent={
-          <View style={s.header}>
-            <Text style={s.title}>Sites</Text>
-            <Text style={s.subtitle}>
-              {sites.length === 0
-                ? 'No sites on this account'
-                : `${sites.length} site${sites.length === 1 ? '' : 's'} on this account`}
-            </Text>
-          </View>
-        }
         renderItem={({ item }) => {
           const active = item.id === selectedSiteId;
           const name = item.site_name || `Site #${item.id}`;

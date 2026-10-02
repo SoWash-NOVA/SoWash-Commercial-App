@@ -10,7 +10,7 @@
 // SiteProvider. Every card shows its own site name instead.
 
 import React from 'react';
-import { View, Text, Image, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ChevronLeft, CircleAlert, ShieldCheck } from 'lucide-react-native';
 import { styles, palette } from '../../src/theme';
@@ -18,6 +18,8 @@ import { useAccent } from '../../src/theme-context';
 import { useSafetyTrainingPhotos, formatDateTime } from '../../src/hooks';
 import { photoUrl } from '../../src/api/client';
 import { SafetyTrainingPhoto } from '../../src/api/types';
+import { PhotoThumb } from '../../src/components/PhotoStripList';
+import PageHeader from '../../src/components/PageHeader';
 
 export default function SafetyTrainingScreen() {
   const router = useRouter();
@@ -28,15 +30,7 @@ export default function SafetyTrainingScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.stubHeader}>
-        <TouchableOpacity
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/documentation' as never))}
-          style={styles.stubBackBtn}
-        >
-          <ChevronLeft size={20} color={palette.inkSoft} />
-        </TouchableOpacity>
-        <Text style={styles.stubTitle}>Safety Training</Text>
-      </View>
+      <PageHeader title="Safety Training" onBack={() => (router.canGoBack() ? router.back() : router.replace('/documentation' as never))} />
 
       {loading && !data ? (
         <View style={local.centre}>
@@ -44,6 +38,10 @@ export default function SafetyTrainingScreen() {
         </View>
       ) : (
         <FlatList
+          initialNumToRender={8}
+          maxToRenderPerBatch={6}
+          windowSize={7}
+          removeClippedSubviews
           data={photos}
           keyExtractor={(p) => String(p.id)}
           contentContainerStyle={local.list}
@@ -77,7 +75,7 @@ function SafetyCard({ photo }: { photo: SafetyTrainingPhoto }) {
   return (
     <View style={local.card}>
       {uri ? (
-        <Image source={{ uri }} style={local.thumb} resizeMode="cover" />
+        <PhotoThumb url={uri} width={64} height={64} radius={14} />
       ) : (
         <View style={[local.thumb, local.thumbPlaceholder]}>
           <ShieldCheck size={20} color={palette.mutedLight} />

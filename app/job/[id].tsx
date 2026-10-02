@@ -25,6 +25,7 @@ import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useJobDetail, useSldWalkthrough, sldHasWalk } from '../../src/hooks';
 import JobDetailBody, { detailStyles } from '../../src/components/JobDetailBody';
+import PageHeader from '../../src/components/PageHeader';
 
 export default function JobDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -40,15 +41,7 @@ export default function JobDetailScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.stubHeader}>
-        <TouchableOpacity
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
-          style={styles.stubBackBtn}
-        >
-          <ChevronLeft size={20} color={palette.inkSoft} />
-        </TouchableOpacity>
-        <Text style={styles.stubTitle}>Visit details</Text>
-      </View>
+      <PageHeader title="Visit details" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
 
       {loading && !data ? (
         <View style={detailStyles.centre}>

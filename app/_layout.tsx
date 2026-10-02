@@ -7,9 +7,11 @@ import React, { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { ThemeProvider } from '../src/theme-context';
 import { AuthProvider, useAuth } from '../src/auth/AuthContext';
+import { TopInsetFill, TopInsetProvider } from '../src/top-inset-color';
 import { initPush } from '../src/push';
 import { palette, ACCENT_DEFAULT } from '../src/theme';
 
@@ -20,8 +22,26 @@ import { palette, ACCENT_DEFAULT } from '../src/theme';
  */
 const PUBLIC_SEGMENTS = ['login'];
 
+/**
+ * Phase 2: office/staff sessions (appRole === 'staff', see
+ * src/auth/AuthContext.tsx) live under app/staff/* — a real path segment, not
+ * a route group, because a route group adds no URL segment and app/(tabs)/
+ * already claims "/" for the client experience; two different route trees
+ * cannot both resolve to "/" in expo-router.
+ *
+ * '/staff', not '/staff/index': confirmed against a freshly-rebuilt
+ * .expo/types/router.d.ts (after a full `expo start -c` restart) that '/staff'
+ * is the one real, navigable route for app/staff/index.tsx — matching
+ * app/documentation/index.tsx's own '/documentation'. An earlier version of
+ * this file used '/staff/index' to work around a typecheck error, based on a
+ * STALE, incompletely-regenerated type snapshot that briefly listed
+ * '/staff/index' and not '/staff' — that string doesn't correspond to a real
+ * route and produced "Unmatched Route" at runtime. Don't reintroduce it.
+ */
+const STAFF_ROOT = '/staff';
+
 function RootNavigator() {
-  const { status } = useAuth();
+  const { status, appRole } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
@@ -31,26 +51,55 @@ function RootNavigator() {
     if (status === 'loading') return;
 
     const onPublicRoute = PUBLIC_SEGMENTS.includes(segments[0] as string);
+    const onStaffRoute = segments[0] === 'staff';
 
-    if (status === 'signedOut' && !onPublicRoute) {
-      router.replace('/login');
-    } else if (status === 'signedIn' && onPublicRoute) {
+    if (status === 'signedOut') {
+      if (!onPublicRoute) router.replace('/login');
+      return;
+    }
+
+    // status === 'signedIn' from here down.
+    if (onPublicRoute) {
+      router.replace(appRole === 'staff' ? STAFF_ROOT : '/');
+      return;
+    }
+
+    // A staff session landing anywhere outside app/staff/* (e.g. the very
+    // first redirect after sign-in, which always lands on "/") belongs there
+    // instead — the client tab tree assumes a client_id that a staff user
+    // does not have.
+    if (appRole === 'staff' && !onStaffRoute) {
+      router.replace(STAFF_ROOT);
+      return;
+    }
+
+    // Defence in depth: a client session should never be able to sit on
+    // app/staff/* (nothing currently produces this, since only a staff-role
+    // login ever sets appRole to 'staff', but a stale deep link should not be
+    // trusted to route a client account into the staff tree).
+    if (appRole === 'client' && onStaffRoute) {
       router.replace('/');
     }
-  }, [status, segments, router]);
+  }, [status, appRole, segments, router]);
 
   // Push registration runs only once signed in: handing the token to the
   // backend needs the JWT, which the axios interceptor attaches only after
   // login. initPush() never throws and returns a no-op teardown when push is
   // unavailable (web preview, no dev build, permission denied), so nothing
   // here needs a try/catch.
+  //
+  // appRole gates WHICH registration endpoint gets the token — see
+  // initPush()'s own header comment. It should never be null once
+  // status === 'signedIn' (appRoleOf() always resolves a non-null user to a
+  // role), but the guard keeps this effect from ever calling initPush with a
+  // role it can't act on rather than trusting that invariant silently.
   useEffect(() => {
-    if (status !== 'signedIn') return;
+    if (status !== 'signedIn' || !appRole) return;
 
     let teardown: (() => void) | undefined;
     let cancelled = false;
 
-    initPush().then((off) => {
+    initPush(appRole).then((off) => {
       // Signing out while permission was still being requested would otherwise
       // leave the listeners attached with no way to reach them.
       if (cancelled) off();
@@ -61,7 +110,7 @@ function RootNavigator() {
       cancelled = true;
       teardown?.();
     };
-  }, [status]);
+  }, [status, appRole]);
 
   if (status === 'loading') {
     return (
@@ -88,17 +137,42 @@ function RootNavigator() {
   );
 }
 
-export default function RootLayout() {
+/**
+ * The app-wide safe-area shell. Every route gets top/bottom insets as padding —
+ * EXCEPT the login screen, which paints its own backdrop edge to edge (gradient,
+ * spheres) and so must reach under the status bar and the nav bar itself;
+ * otherwise a pale strip of this shell's background shows above and below it.
+ * (Login adds the insets back as padding on its own content.)
+ */
+function Shell({ children }: { children: React.ReactNode }) {
+  const segments = useSegments();
+  const onLogin = (segments as string[])[0] === 'login';
   return (
-    <SafeAreaProvider>
-      <ThemeProvider>
-        <AuthProvider>
-          <SafeAreaView style={{ flex: 1, backgroundColor: palette.bg }} edges={['top', 'bottom']}>
-            <StatusBar style="dark" />
-            <RootNavigator />
-          </SafeAreaView>
-        </AuthProvider>
-      </ThemeProvider>
-    </SafeAreaProvider>
+    <SafeAreaView style={{ flex: 1, backgroundColor: palette.bg }} edges={onLogin ? [] : ['top', 'bottom']}>
+      {children}
+    </SafeAreaView>
+  );
+}
+
+export default function RootLayout() {
+  // GestureHandlerRootView: the chat photo viewer's ZoomableImage uses RNGH's
+  // handlers, which throw without one as an ancestor.
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            <TopInsetProvider>
+              <Shell>
+                <StatusBar style="dark" />
+                <RootNavigator />
+                {/* After the navigator so it paints over the (empty) status-bar inset; a chat header colours it. */}
+                <TopInsetFill />
+              </Shell>
+            </TopInsetProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

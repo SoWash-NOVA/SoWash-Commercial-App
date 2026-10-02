@@ -25,9 +25,10 @@
 //   adding one would require moving `main` off expo-router/entry to a custom
 //   entry file — which is exactly the change that complicated the FO app.
 
-import { Platform } from 'react-native';
+import { AppState, NativeModules, Platform } from 'react-native';
 import { router } from 'expo-router';
-import { notificationTarget, pushArrived, registerPushToken } from './hooks';
+import { notificationTarget, pushArrived, registerPushToken, registerStaffPushToken } from './hooks';
+import { AppRole } from './auth/AuthContext';
 
 /**
  * What services/commercialNotifications.js puts in the FCM data block.
@@ -42,6 +43,8 @@ interface PushData {
   schedule_id?: string;
   /** Set on chat_reply. */
   thread_id?: string;
+  /** Set on team_message (internal staff chat). */
+  conversation_id?: string;
 }
 
 type Unsubscribe = () => void;
@@ -102,11 +105,13 @@ export function targetFromPushData(data: PushData | undefined): string | null {
 
   const scheduleId = data.schedule_id ? Number(data.schedule_id) : null;
   const threadId = data.thread_id ? Number(data.thread_id) : null;
+  const conversationId = data.conversation_id ? Number(data.conversation_id) : null;
 
   return notificationTarget({
     type: data.type,
     schedule_id: Number.isFinite(scheduleId) && scheduleId ? scheduleId : null,
     thread_id: Number.isFinite(threadId) && threadId ? threadId : null,
+    conversation_id: Number.isFinite(conversationId) && conversationId ? conversationId : null,
   });
 }
 
@@ -118,23 +123,142 @@ function navigateTo(data: PushData | undefined) {
 }
 
 /**
+ * A one-shot registration attempt with no retry was the actual cause of a
+ * real incident: a transient network failure right after launch left a
+ * device's token stale for as long as the app stayed alive in the
+ * background (days, if never force-closed) — nothing ever tried again
+ * until the next cold start or sign-out/in. Retries a few times with
+ * backoff before giving up; called again from the AppState 'active'
+ * listener below as an ongoing safety net for exactly that "logged in for
+ * days" case, rather than doing anything disruptive like forcing a
+ * sign-out over what's usually a one-second network blip.
+ */
+const REGISTER_RETRY_DELAYS_MS = [5_000, 20_000, 60_000];
+
+/**
+ * Every exit from this function is a plain `return` — never a `throw` — so
+ * its promise always RESOLVES, never rejects, no matter how many attempts
+ * fail. That's deliberate: every call site below fires this without
+ * `await`ing it (registration shouldn't block anything else `initPush` is
+ * doing), and an un-awaited promise that rejects becomes an unhandled
+ * rejection. Making rejection structurally impossible here is what makes
+ * "fire and forget" actually safe to do, rather than something that could
+ * eventually surface as a red-box/crash report for a background retry
+ * nobody's even watching.
+ */
+async function registerWithRetry(
+  register: (t: string) => Promise<void>,
+  token: string,
+  label: string,
+  cancelled: { current: boolean },
+): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    if (cancelled.current) {
+      console.log(`[push] ${label}: registration retry cancelled (session ended)`);
+      return;
+    }
+    try {
+      await register(token);
+      console.log(`[push] ${label}: token registered with backend${attempt > 0 ? ` (after ${attempt} retr${attempt === 1 ? 'y' : 'ies'})` : ''}`);
+      return;
+    } catch (err: any) {
+      const delay = REGISTER_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined) {
+        console.error(
+          `[push] ${label}: registering token FAILED, giving up after ${attempt} retries —`,
+          err?.response?.status,
+          err?.response?.data || err?.message || err,
+        );
+        return;
+      }
+      console.warn(
+        `[push] ${label}: registering token failed, retrying in ${delay / 1000}s —`,
+        err?.response?.status,
+        err?.response?.data || err?.message || err,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
+/**
  * Register this device and wire up notification taps.
  *
  * Call once the user is signed in — registering the token needs the JWT, which
- * the axios interceptor only attaches after login.
+ * the axios interceptor only attaches after login. `role` decides WHICH
+ * registration endpoint gets the token: a client session calling the staff
+ * one (or vice versa) 403s, since each is gated to its own token kind — see
+ * registerPushToken vs registerStaffPushToken in src/hooks.ts for exactly
+ * why this split exists.
  *
  * Returns a teardown for the listeners. Safe to call on every launch, and safe
  * to fail: everything here is caught, because a site manager who declined
  * notifications must still get a working app.
  */
-export async function initPush(): Promise<Unsubscribe> {
+/**
+ * Android notification channels. FCM "notification" messages are drawn by the
+ * OS into whichever channel the message names (`android.notification.channel_id`
+ * on the backend) — and that channel has to exist on the device first. Without
+ * it every push lands in the one default channel, so a mention sounds exactly
+ * like a plain message and a user who muted chatter mutes mentions too.
+ *
+ * @notifee/react-native is used ONLY to create the channel — it never displays
+ * anything here (FCM + the OS still do that), so it can't conflict with the
+ * RNFirebase background handling the way expo-notifications did (see
+ * plugins/withFcmNotification.js). Lazy-required inside try/catch: an APK
+ * built before this dependency was added has no native module, and that must
+ * degrade to "mentions use the default channel", never crash startup.
+ */
+export const MENTIONS_CHANNEL_ID = 'mentions';
+
+async function ensureAndroidChannels(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  // Check for the native module BEFORE requiring the JS: with no native side
+  // (an APK built before notifee was added) notifee's own constructor calls
+  // console.error, which pops a red error box in dev for what is a
+  // perfectly expected "this build predates the channel" situation.
+  if (!NativeModules.NotifeeApiModule) {
+    console.log('[push] Notifee is not in this build — Mentions channel skipped (mentions use the default channel)');
+    return;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const notifee = require('@notifee/react-native');
+    const api = notifee.default ?? notifee;
+    const { AndroidImportance } = notifee;
+    await api.createChannel({
+      id: MENTIONS_CHANNEL_ID,
+      name: 'Mentions',
+      description: 'When a colleague @mentions you or the whole group',
+      importance: AndroidImportance.HIGH,
+      sound: 'default',
+      vibration: true,
+      vibrationPattern: [0, 300, 200, 300],
+      lights: true,
+    });
+  } catch (err) {
+    console.warn('[push] could not create the Mentions channel —', err instanceof Error ? err.message : err);
+  }
+}
+
+export async function initPush(role: AppRole): Promise<Unsubscribe> {
   const noop: Unsubscribe = () => {};
 
   if (Platform.OS === 'web') return noop;
 
   try {
+    // Before permission/token work: channels are independent of both, and
+    // the channel must exist before the first mention push can use it.
+    await ensureAndroidChannels();
+
     const allowed = await ensurePermission();
-    if (!allowed) return noop;
+    if (!allowed) {
+      // This used to fail with zero visible trace — worth knowing WHICH of
+      // the two permission paths (denied outright vs. some other reason)
+      // when chasing why a device's token in user_fcm_tokens never updates.
+      console.warn('[push] initPush: permission not granted, push disabled for this session');
+      return noop;
+    }
 
     const {
       getMessaging,
@@ -147,15 +271,50 @@ export async function initPush(): Promise<Unsubscribe> {
 
     const messaging = getMessaging();
 
+    const register = (t: string) =>
+      role === 'staff' ? registerStaffPushToken(t) : registerPushToken(t, Platform.OS);
+
+    // Stops any retry loop still waiting on its next backoff once this
+    // initPush session ends (sign-out, or the effect re-running) — without
+    // this, a pending retry from an OLD session could fire minutes later
+    // under a NEW one (different account, possibly different role), which
+    // isn't a crash but is exactly the kind of stale-background-work bug
+    // that's easy to ship by accident with fire-and-forget retries.
+    const cancelled = { current: false };
+
     const token = await getToken(messaging);
+    console.log(`[push] initPush: getToken() -> ${token ? `${token.slice(0, 12)}…` : 'null'} (role=${role})`);
     if (token) {
-      await registerPushToken(token, Platform.OS).catch(() => {});
+      // Not awaited on purpose — its own retries/backoff run in the
+      // background rather than delaying the rest of initPush (the
+      // notification-tap listeners below don't depend on this finishing).
+      registerWithRetry(register, token, 'initPush', cancelled);
     }
 
     // A token can be reissued at any time — reinstall, restore, cache clear.
     // Missing this is the classic "push worked for a week then stopped".
     const offRefresh = onTokenRefresh(messaging, (next: string) => {
-      registerPushToken(next, Platform.OS).catch(() => {});
+      console.log(`[push] onTokenRefresh: ${next.slice(0, 12)}… (role=${role})`);
+      registerWithRetry(register, next, 'onTokenRefresh', cancelled);
+    });
+
+    // Safety net for a session that stays open for days without a cold
+    // restart: initPush() only ever runs once per launch, so a device
+    // whose one registration attempt (and its retries above) all happened
+    // to fail would otherwise sit silently unregistered until the user
+    // eventually force-closes and reopens the app, or signs out and back
+    // in. Re-registering is cheap and idempotent (the backend upserts on
+    // the token, see routes/userRoutes.js), so just doing it every time
+    // the app comes back to the foreground is simpler and more robust than
+    // trying to track "did the last attempt actually succeed."
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' || cancelled.current) return;
+      getToken(messaging)
+        .then((t: string | null) => {
+          if (!t || cancelled.current) return;
+          registerWithRetry(register, t, 'app foregrounded', cancelled);
+        })
+        .catch(() => {});
     });
 
     // Foreground: FCM draws no tray notification, so the only visible sign is
@@ -182,13 +341,19 @@ export async function initPush(): Promise<Unsubscribe> {
       .catch(() => {});
 
     return () => {
+      cancelled.current = true;
       offRefresh?.();
       offMessage?.();
       offOpened?.();
+      appStateSub.remove();
     };
-  } catch {
-    // No Firebase config, no dev build, or permission machinery unavailable.
-    // The app keeps working on polling alone.
+  } catch (err) {
+    // No Firebase config, no dev build, or permission machinery unavailable —
+    // still logged (not silent) so a genuine failure here is distinguishable
+    // from those three expected/benign cases when chasing a token that never
+    // updates in user_fcm_tokens. The app still keeps working on polling
+    // alone regardless — this log is diagnostic only, nothing depends on it.
+    console.error('[push] initPush FAILED —', err instanceof Error ? err.message : err);
     return noop;
   }
 }

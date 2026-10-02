@@ -20,7 +20,7 @@
       "googleServicesFile": "./google-services.json",
       "predictiveBackGestureEnabled": false,
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#0B2A3A",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -54,7 +54,7 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": false,
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to take a photo.",
           "microphonePermission": false
         }
       ],
@@ -64,7 +64,8 @@
           "icon": "./assets/notification-icon.png",
           "color": "#0F766E"
         }
-      ]
+      ],
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true

@@ -45,6 +45,7 @@ import {
   formatDateTime,
 } from '../src/hooks';
 import { AppNotification, NotificationType } from '../src/api/types';
+import PageHeader from '../src/components/PageHeader';
 
 /** Icon + tint per event. Mirrors the tone of statusMeta() in src/hooks.ts. */
 function metaFor(type: NotificationType, accent: string) {
@@ -84,15 +85,7 @@ export default function NotificationsScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.stubHeader}>
-        <TouchableOpacity
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
-          style={styles.stubBackBtn}
-        >
-          <ChevronLeft size={20} color={palette.inkSoft} />
-        </TouchableOpacity>
-        <Text style={styles.stubTitle}>Notifications</Text>
-      </View>
+      <PageHeader title="Notifications" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
 
       {loading && !data ? (
         <View style={local.centre}>
@@ -115,6 +108,10 @@ export default function NotificationsScreen() {
         </View>
       ) : (
         <FlatList
+          initialNumToRender={8}
+          maxToRenderPerBatch={6}
+          windowSize={7}
+          removeClippedSubviews
           data={items}
           keyExtractor={(n) => String(n.id)}
           contentContainerStyle={local.list}

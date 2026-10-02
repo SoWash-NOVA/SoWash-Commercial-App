@@ -8,16 +8,26 @@
 //     as strings like "1,250,000" or "300 kW" and must be parsed, not summed.
 //   • site_schedules.status is free-text. Compare case-insensitively.
 
-/** The `users` row behind a portal session, as returned by the login route. */
+/**
+ * The `users` row behind a portal session, as returned by the login route.
+ *
+ * Two shapes share this type since Phase 1 (sowash-backend
+ * routes/portalAuthRoutes.js): a commercial CUSTOMER ("Type" = 'customer',
+ * always has client_id) and an OFFICE/STAFF user ("Type" one of
+ * ci_admin/operations/admin, client_id always null — see
+ * src/auth/AuthContext.tsx's appRoleOf()). Screens that assume client_id is
+ * non-null are client-only screens and must be reached only from
+ * app/(tabs)/*, never app/staff/*.
+ */
 export interface PortalUser {
   id: number;
   firstName: string | null;
   lastName: string | null;
   email: string | null;
-  /** users."Type" — always 'customer' for accounts this app admits. */
+  /** users."Type" — 'customer', or an office role. See the interface comment. */
   role: string | null;
-  /** FK to commercial_clients. The login route rejects accounts without one. */
-  client_id: number;
+  /** FK to commercial_clients. Null for an office/staff user. */
+  client_id: number | null;
 }
 
 export interface LoginResponse {
@@ -383,6 +393,14 @@ export interface SafetyTrainingPhotosResponse {
  *
  * 'chat_reply' was added in Phase 6. Those rows carry thread_id instead of
  * schedule_id and route to the Support tab rather than to a visit.
+ *
+ * Deliberately does NOT include 'team_message' (internal staff chat,
+ * app/staff/chats.tsx's Team section): that push is push-only, same as
+ * commercial-chat's own mention/assign pushes — it never writes a
+ * commercial_notifications row, so this feed-backed type can never actually
+ * hold that value. notificationTarget() in src/hooks.ts still routes it
+ * (its `type` param is intentionally looser than this union, precisely so a
+ * push-only type can be routed without belonging here).
  */
 export type NotificationType = 'crew_started' | 'visit_approved' | 'chat_reply';
 
@@ -469,6 +487,16 @@ export interface ChatVisitTag {
 export interface ChatMessage {
   id: number;
   sender_kind: ChatSenderKind;
+  /**
+   * Staff-only (routes/commercialChatRoutes.js's shapeMessage only —
+   * customerJobHistoryRoutes.js's shapeChatMessage never selects it):
+   * WHICH agent sent this, needed to tell "an agent sent this"
+   * (sender_kind) apart from "I sent this" (sender_user_id === the
+   * viewing agent's own id) now that more than one office role can reply
+   * in the same thread. Optional, like mentioned_user_id below, for the
+   * same reason — an older response shape may not carry it.
+   */
+  sender_user_id?: number | null;
   body: string | null;
   /** Server path like "/uploads/commercial-chat/…". Needs SERVER_BASE. */
   attachment_url: string | null;
@@ -477,6 +505,24 @@ export interface ChatMessage {
   /** Staff name on an agent message; the sender's name on a customer one. */
   sender_name: string | null;
   visit: ChatVisitTag | null;
+  /** Which of the client's sites this message is about (null = General). Optional: absent on an older server. */
+  site_id?: number | null;
+  site_name?: string | null;
+  /**
+   * Staff-only @-mention on this one message (docs/migrations/2026-09-28-
+   * commercial-chat-mentions.sql) — always null on the customer side, which
+   * never selects this column at all (see the migration's own header).
+   * Optional rather than just nullable: a client-app build made before this
+   * migration existed never sent the field either shape.
+   */
+  mentioned_user_id?: number | null;
+  mentioned_name?: string | null;
+  /** Client-only (optimistic send, see useStaffChatThread): not on the server yet. */
+  pending?: boolean;
+  /** Client-only: the send failed — kept on screen with Retry / Delete. */
+  failed?: boolean;
+  /** Client-only: local file:// URI to render before attachment_url exists. */
+  localPhotoUri?: string;
 }
 
 export interface ChatThread {
@@ -490,10 +536,435 @@ export interface ChatResponse {
   thread: ChatThread;
   messages: ChatMessage[];
   unread: number;
+  /** Every reaction in the thread (flat). Optional: absent on an older server. */
+  reactions?: TeamReaction[];
 }
 
 export interface ChatDeltaResponse {
   success: boolean;
   messages: ChatMessage[];
   count: number;
+  reactions?: TeamReaction[];
+}
+
+/** One ring a client made for a site, with how far staff got. Status is derived from the shared thread. */
+export interface ChatRing {
+  id: number;
+  site_id: number;
+  body: string | null;
+  created_at: string;
+  answered_at: string | null;
+  completed_at: string | null;
+  status: 'waiting' | 'answered' | 'completed';
+}
+
+export interface ChatRingsResponse {
+  success: boolean;
+  rings: ChatRing[];
+}
+
+/** GET /customer-portal/chat/typing — is an agent typing to this client right now. */
+export interface ChatTypingResponse {
+  success: boolean;
+  agent_typing: boolean;
+  agent_name: string | null;
+}
+
+// ─────────────────────────── office/staff (Phase 3) ───────────────────────────
+//
+// Everything below talks to /api/schedule/*, NOT /api/customer-portal/* — the
+// staff-authenticated surface (sowash-backend routes/schedulingRoutes.js),
+// reached with an office_portal token via the staff `authenticate` gate
+// (routes/middleware/auth.js). No approval gate, no client scoping: an office
+// session sees every client's jobs, which is the entire point of these types.
+// Transcribed from GET /history and the new GET /clients added in Phase 3 —
+// a DIFFERENT SELECT list from JobSummary above, not a re-export of it.
+
+/** One row from GET /api/schedule/history. */
+export interface StaffJob {
+  schedule_id: number;
+  site_id: number | null;
+  client_id: number;
+  site_name: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  system_size: string | number | null;
+  system_type: string | null;
+  client_name: string | null;
+  scheduled_date: string | null;
+  service_number: string | number | null;
+  status: string | null;
+  approval_status: string | null;
+  approved_at: string | null;
+  priority: string | null;
+  shift: string | null;
+  previous_shift: string | null;
+  reached_location_at: string | null;
+  started_at: string | null;
+  before_photos_at: string | null;
+  after_photos_at: string | null;
+  completed_at: string | null;
+  before_photos: string | null;
+  after_photos: string | null;
+  notes: string | null;
+  team_lead_name: string | null;
+  // ── field_service_reports, LEFT JOINed: all null when no FSR was filed ──
+  fsr_id: number | null;
+  cable_condition: string | null;
+  cable_quantity: string | number | null;
+  panel_damage: string | null;
+  panel_brand: string | null;
+  inverter_alarm: string | null;
+  alarm_code: string | null;
+  potential_shading: string | null;
+  shading_details: string | null;
+  rusting: string | null;
+  bird_dropping: string | null;
+  mos_and_debris: string | null;
+  earthing: string | null;
+  cash_collected: string | null;
+  customer_signature: string | null;
+  additional_notes: string | null;
+  temp_voltage_photos: string | null;
+  total_panels_cleaned: string | number | null;
+  /**
+   * Pre-shaped server-side from the raw temp_voltage_photos column above —
+   * see the matching comment in sowash-backend routes/schedulingRoutes.js.
+   * Optional, not just possibly-empty: a backend that hasn't been redeployed
+   * with the change that adds this field yet simply won't send it at all, so
+   * callers must `?? []` rather than assume the array is always present.
+   */
+  tbt_photos?: StaffTbtPhoto[];
+  /** Who clocked in/out for THIS job specifically (attendance.job_id). Optional — see tbt_photos. */
+  attendance?: StaffAttendanceRecord[];
+}
+
+export interface StaffTbtPhoto {
+  photo_url: string;
+  captured_at: string | null;
+}
+
+export interface StaffAttendanceRecord {
+  fo_name: string;
+  clock_in_at: string | null;
+  clock_out_at: string | null;
+  status: string;
+  clock_in_image_url: string | null;
+  clock_out_image_url: string | null;
+}
+
+export interface StaffJobsResponse {
+  success: boolean;
+  jobs: StaffJob[];
+}
+
+export interface StaffStats {
+  total: number;
+  completed: number;
+  inProgress: number;
+  scheduled: number;
+  rescheduled: number;
+}
+
+/** One row from GET /api/schedule/clients. */
+export interface StaffClient {
+  client_id: number;
+  client_name: string | null;
+  contact_person: string | null;
+  contact_number: string | null;
+  completed_jobs: number;
+  total_sites: number;
+  /** MAX(scheduled_date) across every visit for this client. Null = never scheduled one. Drives the "most recent first" ordering /schedule/clients now returns. */
+  last_job_date: string | null;
+}
+
+export interface StaffClientsResponse {
+  success: boolean;
+  clients: StaffClient[];
+}
+
+// ─────────────────────── office staff chat (Phase 4) ───────────────────────
+//
+// Talks to /api/commercial-chat/* (sowash-backend routes/commercialChatRoutes.js)
+// — the STAFF side of the same client-support conversations ChatThread in
+// app/(tabs)/support.tsx reads from the CUSTOMER side
+// (/api/customer-portal/chat*). Same underlying tables, two different APIs
+// with two different visibility rules (see commercialChatVisit.js's shapeVisit
+// `staff` flag) — never point this screen at the customer-portal endpoints or
+// vice versa.
+//
+// Messages reuse ChatMessage/ChatVisitTag as-is: routes/commercialChatRoutes.js's
+// shapeMessage() and customerJobHistoryRoutes.js's shapeChatMessage() both
+// build the exact same {id, sender_kind, body, attachment_url, attachment_name,
+// created_at, sender_name, visit} shape from utils/commercialChatVisit.js — the
+// only difference is the VALUES inside `visit` (staff sees more), never the
+// shape itself.
+//
+// Gated to ci_admin only, not the full OFFICE_ROLES set — see SUPPORT_ROLES in
+// commercialChatRoutes.js. An operations/admin office session will 403 here
+// even though it can use the rest of app/staff/*.
+
+/** One row from GET /api/commercial-chat/threads — the inbox list. */
+export interface StaffChatThread {
+  id: number;
+  /** How many sites the client wrote about that nobody has replied to yet (inbox only). */
+  waiting_sites?: number;
+  client_id: number;
+  status: 'open' | 'closed';
+  assigned_user_id: number | null;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  last_sender_kind: ChatSenderKind | null;
+  client_name: string | null;
+  contact_person: string | null;
+  contact_number: string | null;
+  assigned_name: string | null;
+  /**
+   * Who sent last_message_preview — looked up from the message row itself,
+   * since commercial_chat_threads has no last_sender_user_id column, only
+   * last_sender_kind (a type, not a person). Only meaningful when
+   * last_sender_kind === 'agent'; null for a customer- or system-sent
+   * preview (system messages already name who did what in their own text).
+   */
+  last_sender_user_id: number | null;
+  last_sender_name: string | null;
+  /** Unread FOR THE CALLING AGENT — see AGENT_UNREAD_EXPR's header comment. */
+  unread: number;
+}
+
+export interface StaffChatThreadsResponse {
+  success: boolean;
+  threads: StaffChatThread[];
+  count: number;
+}
+
+/** GET /api/commercial-chat/unread → threads needing attention, not a message count. */
+export interface StaffChatUnreadResponse {
+  success: boolean;
+  threads: number;
+}
+
+export interface StaffChatMessagesResponse {
+  success: boolean;
+  messages: ChatMessage[];
+  count: number;
+  reactions?: TeamReaction[];
+  has_more?: boolean;
+}
+
+/** GET /commercial-chat/threads/:id/typing */
+export interface StaffChatTypingResponse {
+  success: boolean;
+  customer_typing: boolean;
+  /** A colleague typing in the same thread (never me), or null. */
+  agent_typing_name: string | null;
+}
+
+export interface StaffChatSendResponse {
+  success: boolean;
+  message: ChatMessage;
+}
+
+/** GET /api/commercial-chat/agents — the assignee picker's own list. */
+export interface StaffChatAgent {
+  id: number;
+  name: string | null;
+  email: string | null;
+  type: string;
+}
+
+export interface StaffChatAgentsResponse {
+  success: boolean;
+  agents: StaffChatAgent[];
+  count: number;
+}
+
+/**
+ * GET /api/commercial-chat/threads/:id and the PATCH response — the ONE
+ * thread's own metadata, distinct from StaffChatThread above (that's the
+ * inbox LIST row's shape; this adds fields the list doesn't select, like
+ * email and created_at).
+ */
+export interface StaffChatThreadDetail {
+  id: number;
+  /** Sites the client wrote about that nobody has replied to yet (automatic — a reply clears them). */
+  waiting_sites?: StaffChatWaitingSite[];
+  client_id: number;
+  status: 'open' | 'closed';
+  assigned_user_id: number | null;
+  created_at: string;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  last_sender_kind: ChatSenderKind | null;
+  client_name: string | null;
+  contact_person: string | null;
+  contact_number: string | null;
+  email: string | null;
+  assigned_name: string | null;
+  unread: number;
+}
+
+/** A site the client wrote about that no agent has replied to yet. */
+export interface StaffChatWaitingSite {
+  site_id: number;
+  site_name: string | null;
+  last_at: string;
+}
+
+export interface StaffChatThreadDetailResponse {
+  success: boolean;
+  thread: StaffChatThreadDetail;
+}
+
+// ─────────────────────── internal staff chat (Phase 5) ───────────────────────
+//
+// Talks to /api/staff-chat/* (sowash-backend routes/staffChatRoutes.js) —
+// staff TALKING TO EACH OTHER (DMs + groups), not to a client. Distinct
+// tables (staff_conversations/staff_conversation_participants/staff_messages)
+// from commercial-chat's client-support threads above; distinct role gate
+// (any STAFF_ROLES member, not ci_admin-only). Surfaces as a second "Team"
+// section on the same app/staff/chats.tsx screen, not a new tab.
+//
+// TeamMessage is its own type rather than reusing ChatMessage: same rough
+// shape (id/body/attachment/sender/mentioned fields) but sender_kind's
+// possible values differ ('staff'|'system', never 'customer'/'agent'), and
+// there is no visit tag here at all.
+
+export type TeamSenderKind = 'staff' | 'system';
+
+/** The slice of a replied-to message the quote block needs — never the full original. */
+export interface TeamReplyRef {
+  id: number;
+  sender_name: string | null;
+  body: string | null;
+  has_photo: boolean;
+}
+
+export interface TeamMessage {
+  id: number;
+  conversation_id: number;
+  sender_kind: TeamSenderKind;
+  sender_user_id: number | null;
+  body: string | null;
+  attachment_url: string | null;
+  attachment_name: string | null;
+  created_at: string;
+  sender_name: string | null;
+  mentioned_user_id: number | null;
+  mentioned_name: string | null;
+  /** @all in a group — notifies every member. Optional: absent on rows from before the column existed. */
+  mention_all?: boolean;
+  /** Reply-to-message: the message this one quotes. Optional: absent on rows from before the column existed. */
+  reply_to_id?: number | null;
+  reply_to?: TeamReplyRef | null;
+  /**
+   * Client-only — never present on anything the API returns. Set by
+   * useTeamConversation's optimistic send (src/hooks.ts) on the local copy
+   * of a message shown immediately, before the server round-trip confirms
+   * it. `id` is a negative placeholder while pending; the real row (and
+   * real id) replaces it on success, or it's removed on failure.
+   */
+  pending?: boolean;
+  /** Client-only: the send failed — the bubble stays with Retry / Delete instead of vanishing (see useTeamConversation). */
+  failed?: boolean;
+  /** Client-only: a local `file://` URI to render before attachment_url exists (see `pending`). */
+  localPhotoUri?: string;
+}
+
+/** One row from GET /api/staff-chat/conversations — the Team inbox list. */
+export interface TeamConversation {
+  id: number;
+  kind: 'dm' | 'group';
+  /** Group name, or the OTHER participant's name for a dm — resolved server-side. */
+  name: string | null;
+  /** Set only for a dm (who the "name" above refers to). Null for a group. */
+  other_participant_id: number | null;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  last_sender_user_id: number | null;
+  /** Who last_message_preview is from — a direct users join on the FK, not a lookup, so always present when last_sender_user_id is. */
+  last_sender_name: string | null;
+  unread: number;
+  /** True while an @-mention of me in this conversation is still unread — drives the "pinned to top + highlighted" treatment (a plain unread message doesn't get this). GET /conversations also sorts on this server-side, so the list is already in this order without any client-side re-sort. */
+  has_unread_mention: boolean;
+}
+
+export interface TeamConversationsResponse {
+  success: boolean;
+  conversations: TeamConversation[];
+}
+
+export interface TeamParticipant {
+  id: number;
+  name: string | null;
+  role: 'admin' | 'member';
+  /** Drives the "seen" (blue double-tick) state on a message this participant didn't send — see messageSeenStatus() in app/staff/chats.tsx. */
+  last_read_at: string | null;
+  /** Drives the "delivered" (grey double-tick) state — bumped whenever this participant's client actually fetches the conversation's messages, whether or not they've read them. */
+  last_delivered_at: string | null;
+  /** True while this participant has at least one staff-chat socket open right now — live process state, not a DB column (see services/staffChatSocket.js's isUserOnline()). */
+  online: boolean;
+  /** The last moment `online` went from true to false — null if never seen offline (or never connected at all). Only meaningful when `online` is false. */
+  last_seen_at: string | null;
+}
+
+/**
+ * GET /api/staff-chat/conversations/:id and the POST/PATCH response bodies —
+ * the one conversation's full detail, participants included (the list row
+ * above doesn't carry these). `other_participant_id` mirrors TeamConversation.
+ */
+/** One user's emoji reaction to one message (one per user per message). */
+export interface TeamReaction {
+  message_id: number;
+  user_id: number;
+  emoji: string;
+}
+
+export interface TeamConversationDetail {
+  id: number;
+  kind: 'dm' | 'group';
+  name: string | null;
+  other_participant_id: number | null;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+  last_sender_user_id: number | null;
+  participants: TeamParticipant[];
+  /** Every reaction in the conversation, flat — grouped per message client-side. Optional for older cached copies. */
+  reactions?: TeamReaction[];
+}
+
+export interface TeamConversationResponse {
+  success: boolean;
+  conversation: TeamConversationDetail;
+}
+
+export interface TeamMessagesResponse {
+  success: boolean;
+  messages: TeamMessage[];
+  count: number;
+  has_more?: boolean;
+}
+
+export interface TeamMessageResponse {
+  success: boolean;
+  message: TeamMessage;
+}
+
+export interface TeamUnreadResponse {
+  success: boolean;
+  unread: number;
+}
+
+/** GET /api/staff-chat/directory — the DM-recipient, group-member, and mention picker's shared list. */
+export interface StaffDirectoryUser {
+  id: number;
+  name: string | null;
+  email: string | null;
+  type: string;
+}
+
+export interface StaffDirectoryResponse {
+  success: boolean;
+  users: StaffDirectoryUser[];
 }

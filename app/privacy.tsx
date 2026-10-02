@@ -23,6 +23,7 @@ import { ChevronLeft } from 'lucide-react-native';
 import { styles, palette } from '../src/theme';
 import { useAccent } from '../src/theme-context';
 import { PRIVACY_EMAIL } from '../src/contact';
+import PageHeader from '../src/components/PageHeader';
 
 const LAST_UPDATED = '10 August 2026';
 
@@ -55,15 +56,7 @@ export default function PrivacyScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.stubHeader}>
-        <TouchableOpacity
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
-          style={styles.stubBackBtn}
-        >
-          <ChevronLeft size={20} color={palette.inkSoft} />
-        </TouchableOpacity>
-        <Text style={styles.stubTitle}>Privacy policy</Text>
-      </View>
+      <PageHeader title="Privacy policy" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <Text style={local.updated}>Last updated {LAST_UPDATED}</Text>

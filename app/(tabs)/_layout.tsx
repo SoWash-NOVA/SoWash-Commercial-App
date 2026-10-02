@@ -27,12 +27,14 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Tabs } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Building2, ClipboardList, LayoutGrid, MessagesSquare, User } from 'lucide-react-native';
 import { palette } from '../../src/theme';
-import { useAccent } from '../../src/theme-context';
+import { BRAND_GREEN_DEEP, BRAND_GREEN_MID, HEADER_STOPS } from '../../src/brand';
 import { SiteProvider } from '../../src/site-context';
 import { useChatUnread } from '../../src/hooks';
+import { useChatOpen } from '../../src/chat-focus';
 
 const IDLE = palette.mutedLight;
 const CIRCLE = 42;
@@ -149,10 +151,18 @@ function CentreItem({
         <Animated.View
           style={[
             local.centreCircle,
-            { backgroundColor: accent, transform: [{ scale: press }] },
+            { backgroundColor: HEADER_STOPS.end, transform: [{ scale: press }] },
             active && local.centreCircleActive,
           ]}
         >
+          {/* the same green as the page headers (src/brand.ts) */}
+          <LinearGradient
+            pointerEvents="none"
+            colors={[BRAND_GREEN_MID, HEADER_STOPS.mid]}
+            start={{ x: 0.2, y: 0 }}
+            end={{ x: 0.9, y: 1 }}
+            style={local.centreFill}
+          />
           <MessagesSquare size={26} color="#fff" />
           {badge > 0 ? (
             <View style={local.badge}>
@@ -176,9 +186,11 @@ function CustomTabBar({
   // here rather than fought with a fixed interface.
   navigation: { emit: (event: unknown) => unknown; navigate: (name: never) => void };
 }) {
-  const { accent } = useAccent();
+  // Brand green (src/brand.ts), not the user-selectable accent: the bar matches the page headers.
+  const accent = BRAND_GREEN_DEEP;
   const { unread } = useChatUnread();
   const insets = useSafeAreaInsets();
+  const chatOpen = useChatOpen();
 
   const byName: Record<string, { route: TabRoute; index: number }> = {};
   state.routes.forEach((r: TabRoute, i: number) => {
@@ -198,6 +210,9 @@ function CustomTabBar({
       navigation.navigate(entry.route.name as never);
     }
   };
+
+  // A chat is open: no tab bar, the conversation gets the full height.
+  if (chatOpen) return null;
 
   return (
     <View style={[local.wrapper, { paddingBottom: Math.max(insets.bottom, 10) }]} pointerEvents="box-none">
@@ -243,7 +258,9 @@ export default function TabsLayout() {
     <SiteProvider>
       <Tabs
         screenOptions={{ headerShown: false }}
-        tabBar={(props) => <CustomTabBar state={props.state} navigation={props.navigation} />}
+        // `navigation` is cast: expo-router's NavigationHelpers is wider than the two methods CustomTabBar uses
+        // (emit + navigate) — a long-standing typing mismatch only, no runtime difference.
+        tabBar={(props) => <CustomTabBar state={props.state} navigation={props.navigation as never} />}
       >
         <Tabs.Screen name="index" options={{ title: 'Overview' }} />
         <Tabs.Screen name="jobs" options={{ title: 'Visits' }} />
@@ -312,6 +329,7 @@ const local = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
+  centreFill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: CENTRE_CIRCLE / 2 },
   centreCircleActive: {
     shadowOpacity: 0.3,
   },
