@@ -59,6 +59,21 @@ src/
     SiteSwitcher.tsx            header control for picking the active site
     MeshBlob.tsx, StatusBar.tsx  decorative bits
 
+app/staff/                    OFFICE/STAFF mode (a second identity — see 2026-09-28 entry): Overview, Jobs, Chats
+                                 (Support + Team), Clients, Account
+app/documentation/            Documentation menu: Site SLD, TBT, Safety Training
+
+src/ (additions since the first map — see the 2026-10-0x changelog entries)
+  brand.ts                     logo colours + HEADER_STOPS (green-led header gradient)
+  dataCache.ts                 in-memory stale-while-revalidate cache behind useAsync (cleared on auth change)
+  chat-focus.ts                "a chat is open": hides the tab bars + Android back closes the chat
+  useChatScroll.ts             opens chats at the newest message; scroll-up paging for older ones
+  top-inset-color.tsx          status-bar strip that matches the page header
+  teamChatSocket.ts, staff-context.tsx, photoPicker.ts
+  components/                  ChatHeaderBar, PageHeader, ChatBackground, FadeInRow, BubblePhysics (login),
+                               FloatingTabBar, PhotoStripList (lazy photo rows/tiles), KeyboardScreen
+                               (keeps the composer above the keyboard), ComingSoon
+
 plugins/withFcmNotification.js  Expo config plugin: FCM tray icon/color, works around a
                                  manifest-merger conflict between expo-notifications and
                                  @react-native-firebase/messaging
@@ -350,6 +365,41 @@ Sibling repos checked out under `D:\github\nova\`:
 Newest first. Each entry: what changed, in which file(s)/repo, and deploy status (this
 backend's deploys are **manual** — WinSCP sync + `pm2 restart` on the VPS, nothing here
 auto-deploys, so "fixed" below means "fixed in this working tree," not "live").
+
+### 2026-10-03 — SESSION SNAPSHOT: everything done in the 2026-10-01 → 10-03 push, and what is still open (read first)
+
+Confirmed working by the user on a device: chats open on the newest message (also on a first open after a Metro `r` reload), the
+composer stays above the keyboard, tab bar hidden inside chats, back returns to the chat list. Everything else below was verified by
+typecheck + `expo export --platform android` only, NOT on a device.
+
+**Chat features:** Team: `@all`, filters (All/Unread/Groups), failed-send Retry/Delete, reply + swipe-to-reply, emoji reactions + overlay,
+admin-only message delete (org `admin`, `DELETE /api/staff-chat/conversations/:id/messages/:mid`). Support parity (staff ↔ client): photo
+zoom, search, typing, optimistic send, reactions; reaction push. Per-site "ring" history on the client Support tab, site label on
+messages, close/reopen from mobile (warns about waiting sites), several logins per client no longer look like one person.
+**Chat loading:** newest 40 messages on open (`limit`/`before_id`/`has_more` on the three message endpoints), older load on scroll-up;
+list laid out in one pass and pinned to the end once it has rows; paging only after the user drags.
+**Design:** green-led brand header gradient on every page (`PageHeader`/`ChatHeaderBar`), status-bar strip matches, chat wallpaper, list
+redesign, green chat buttons, logo-themed login (draggable physics bubbles, "SoWash Commercial App", "Powered By iNOVAA.AI"), "SC" app
+icon, Team own-bubbles in logo blue. **Responsiveness:** verified by rendering at 320/360/768px; header/title fixes.
+**Performance:** startup no longer blocks on the profile call; lazy/virtualised photo rows with retry (popups, TBT, Safety, Maintenance);
+SLD prefetches only neighbouring points; stale-while-revalidate `useAsync`; FlatList tuning + `React.memo(JobCard)`.
+
+**Backend files changed (all need WinSCP upload + `pm2 restart`; NEVER upload the local package-lock.json):** `routes/staffChatRoutes.js`,
+`routes/commercialChatRoutes.js`, `routes/customerJobHistoryRoutes.js` (this batch: paging + delete); earlier in the push also
+`routes/schedulingRoutes.js`, `services/{chatTyping,staffPush,staffChatNotifications,staffMentionReminders,commercialNotifications}.js`.
+**Migrations to have run BEFORE uploading:** `2026-10-01-commercial-chat-reactions.sql`, `2026-10-01-staff-message-reactions.sql`,
+`2026-10-01-staff-message-replies.sql`, `2026-10-02-commercial-chat-message-site.sql` (+ `2026-10-01-staff-mention-all.sql`, already applied).
+This batch needs NO migration.
+
+**Build:** `eas build --platform android --profile production-apk` (commit first — EAS builds from the git snapshot). The new build is
+required for: the SC icon, `@notifee/react-native` (Mentions channel), `expo-image`, `react-native-gesture-handler` root view. Plain JS
+changes (everything in this snapshot except those) reload with `r`.
+
+**Still open / known limits:** nothing is committed in either repo; header/login/list visuals and the lag work were not seen/felt on a
+device; no server-side thumbnails (would need `sharp` on the VPS); large Android font sizes untested; the user-selectable teal accent still
+drives pills/badges next to the green headers (offered to unify — unanswered); admin delete reaches other participants live only if the
+WebSocket works through the proxy; client Support chat has no delete and loads its newest 100 without paging; Safety Training upload UI
+(web portal) is the web team's task; if a chat ever stops short of the newest message again, the next step is an inverted FlatList.
 
 ### 2026-10-03 (open at newest, 3rd pass) — Real cause of "first open is wrong, second open is right": the settle timers started too early (written, NOT yet seen on a device)
 
