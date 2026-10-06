@@ -41,6 +41,7 @@ import { useClient, formatDateOnly, formatSystemSize } from '../../src/hooks';
 import { useSiteContext } from '../../src/site-context';
 import { PRIVACY_EMAIL } from '../../src/contact';
 import PageHeader from '../../src/components/PageHeader';
+import AppearanceCard from '../../src/components/AppearanceCard';
 
 /** Accent options, matching the residential app's picker. Teal leads here. */
 const ACCENTS = ['#0F766E', '#2E6BFF', '#7C3AED', '#B45309', '#BE123C'];
@@ -182,6 +183,9 @@ export default function ProfileScreen() {
             <Row icon={<User size={16} color={palette.muted} />} label="Account manager" value={c?.sales_agent} last />
           </View>
         ) : null}
+
+        {/* ── Light / dark ───────────────────────────────────────────── */}
+        <AppearanceCard style={{ marginTop: 16 }} />
 
         {/* ── Accent ─────────────────────────────────────────────────── */}
         <View style={[styles.card, { marginTop: 16 }]}>

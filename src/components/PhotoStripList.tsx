@@ -25,6 +25,7 @@
 //    photo rows mount a beat later, so the slide-in animation isn't competing with them.
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { tc } from '../themeEngine';
 import {
   ActivityIndicator,
   FlatList,
@@ -83,7 +84,7 @@ export function PhotoThumb({
   }, []);
 
   return (
-    <View style={{ width, height, borderRadius: radius, overflow: 'hidden', backgroundColor: TILE_BG }}>
+    <View style={{ width, height, borderRadius: radius, overflow: 'hidden', backgroundColor: tc(TILE_BG) }}>
       <Image
         key={attempt}
         source={{ uri: url }}
@@ -158,8 +159,8 @@ export function PhotoStripList({
 export function PhotoStripSkeleton({ width, height, radius = 12 }: { width: number; height: number; radius?: number }) {
   return (
     <View style={{ flexDirection: 'row', gap: 8, height }}>
-      <View style={{ width, height, borderRadius: radius, backgroundColor: TILE_BG }} />
-      <View style={{ width: width * 0.6, height, borderRadius: radius, backgroundColor: TILE_BG, opacity: 0.6 }} />
+      <View style={{ width, height, borderRadius: radius, backgroundColor: tc(TILE_BG) }} />
+      <View style={{ width: width * 0.6, height, borderRadius: radius, backgroundColor: tc(TILE_BG), opacity: 0.6 }} />
     </View>
   );
 }

@@ -65,7 +65,23 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   back: { width: 34, height: 34, marginLeft: -6, alignItems: 'center', justifyContent: 'center' },
   titleBlock: { flex: 1 },
-  title: { fontSize: 26, fontWeight: '900', color: '#fff' },
+  // soft shadow: white on the logo's light sky blue needs a little help to read
+  title: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#fff',
+    textShadowColor: 'rgba(8,60,95,0.35)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+  },
   titleSmall: { fontSize: 20 },
-  sub: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.95)', marginTop: 2 },
+  sub: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#fff',
+    marginTop: 2,
+    textShadowColor: 'rgba(8,60,95,0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
 });

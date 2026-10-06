@@ -1,4 +1,5 @@
 import { StyleSheet } from 'react-native';
+import { DARK, ThemeMode } from './themeEngine';
 
 /**
  * Shared design system with sowash-customer-app. The component language —
@@ -16,7 +17,7 @@ import { StyleSheet } from 'react-native';
 /** Default accent. Runtime accent lives in ThemeProvider (src/theme-context.tsx). */
 export const ACCENT_DEFAULT = '#0F766E';
 
-export const palette = {
+const LIGHT_PALETTE = {
   bg: '#F4F7FC',
   surface: '#ffffff',
   border: '#e2e8f0',
@@ -29,7 +30,31 @@ export const palette = {
   goodBright: '#00E676',
   warn: '#FFB800',
   danger: '#f43f5e',
-} as const;
+};
+
+const DARK_PALETTE: typeof LIGHT_PALETTE = {
+  ...LIGHT_PALETTE,
+  bg: DARK.bg,
+  surface: DARK.surface,
+  border: DARK.border,
+  borderSubtle: DARK.surfaceAlt,
+  ink: DARK.ink,
+  inkSoft: DARK.inkSoft,
+  muted: DARK.muted,
+  mutedLight: DARK.mutedLight,
+};
+
+/**
+ * The live palette. Read it at RENDER time (`palette.ink`), never copy a value into a
+ * module-level constant — `applyPalette()` swaps its values when the theme changes
+ * (light/dark, src/theme-mode.tsx) and the app tree remounts. Stylesheets that captured
+ * a light value at import are handled by the StyleSheet patch in src/themeEngine.ts.
+ */
+export const palette: Readonly<typeof LIGHT_PALETTE> = { ...LIGHT_PALETTE };
+
+export function applyPalette(mode: ThemeMode) {
+  Object.assign(palette, mode === 'dark' ? DARK_PALETTE : LIGHT_PALETTE);
+}
 
 export const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#F4F7FC' },

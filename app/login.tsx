@@ -8,19 +8,23 @@
 // credentials, a staff account, an account with no client link. We show its
 // message verbatim rather than flattening them into "login failed".
 //
-// Look (a trial, login only): built around the SoWash logo — sky blue + lime
-// green — but restrained. The user liked the floating bubbles and found the first
-// pass "childish", so: the bubbles stay but are drawn as delicate soap bubbles
-// (clear body, iridescent rim, crescent highlight); the logo sits directly on the
-// backdrop (no sticker box); features are a quiet text row, not candy chips; the
-// card is calm; and the button is dark ink with a lime accent instead of a glossy
-// toy. Brand colours are used as ACCENTS. Colours are fixed brand colours, not the
-// user-selectable accent (nobody is signed in yet).
+// Look (2026-10-05, from a reference the user shared): a white page with big
+// organic wave shapes in the corners, an illustration in the hero, underline
+// inputs (label on the left, a small action on the right) and pill gradient
+// buttons. The reference's orange/teal are swapped for the SoWash brand GREEN
+// (leading) and sky BLUE. Colours are fixed brand colours, not the
+// user-selectable accent (nobody is signed in yet). The illustration — a general
+// one (a laptop with the desktop dashboard + a phone with the mobile app, chat bubble,
+// check badge; no solar imagery, on purpose)
+// — is drawn in SVG, so no image ships.
 //
 // Layout rule learned the hard way: nothing here may change size in response to
 // the keyboard — on Android that dismisses it as soon as a field is tapped. Size
-// depends only on the physical screen; focusing a field just scrolls (and the
-// focus "glow" is an absolutely-positioned ring, so it can't affect layout).
+// depends only on the physical screen (measured with the keyboard closed); when the
+// keyboard opens, empty space is appended BELOW the content and the page scrolls the
+// form card above the keys (no KeyboardAvoidingView). With the keyboard closed the page
+// is sized to exactly one screen and scrolling is off, so there is no stray scroll.
+// The focus underline is an absolutely-positioned layer, so it can't affect layout.
 // The screen draws edge to edge (see Shell in app/_layout.tsx), so the insets are
 // added back below as padding on the content.
 
@@ -35,44 +39,176 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  KeyboardAvoidingView,
+  Keyboard,
   Platform,
   ScrollView,
   StyleSheet,
   Dimensions,
-  PanResponder,
   useWindowDimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowRight, Eye, EyeOff, Lock, Mail, ShieldCheck, TriangleAlert } from 'lucide-react-native';
+import Svg, { Circle, Defs, Ellipse, Line, LinearGradient as SvgGradient, Path, Rect, Stop } from 'react-native-svg';
+import { ArrowRight, Check, Lock, TriangleAlert } from 'lucide-react-native';
 import { palette } from '../src/theme';
 import { useAuth } from '../src/auth/AuthContext';
-import { BRAND_BLUE, BRAND_GREEN, BRAND_GREEN_DEEP, BRAND_GREEN_MID } from '../src/brand';
-import ChatBackground from '../src/components/ChatBackground';
-import { BubbleSpec, PhysicsBubble, useBubblePhysics } from '../src/components/BubblePhysics';
+import { BRAND_BLUE, BRAND_GREEN, BRAND_GREEN_DEEP, BRAND_INK } from '../src/brand';
 
-// Sampled from the logo file itself.
-// (brand colours live in src/brand.ts — sampled from the logo)
-const INK = '#0b2a3a';
+const INK = BRAND_INK;
+const BLUE_DEEP = '#0E78B5';
+const BLUE_LIGHT = '#7FD3FA';
+const GREEN_LIGHT = '#D2FF92';
+const GREEN_DARK = '#2E9E00';
 const LOGO = require('../assets/sowash-logo.png');
 const LOGO_RATIO = 248 / 1004;
 
 type Field = 'email' | 'password' | null;
 
+/** Top wave shapes. Drawn in a 400×360 box stretched to the hero (preserveAspectRatio none). */
+function TopWaves({ width, height }: { width: number; height: number }) {
+  return (
+    <Svg width={width} height={height} viewBox="0 0 400 360" preserveAspectRatio="none" style={StyleSheet.absoluteFill}>
+      <Defs>
+        <SvgGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor={GREEN_LIGHT} />
+          <Stop offset="0.55" stopColor={BRAND_GREEN} />
+          <Stop offset="1" stopColor="#3DB800" />
+        </SvgGradient>
+        <SvgGradient id="g2" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={GREEN_LIGHT} stopOpacity="0.9" />
+          <Stop offset="1" stopColor={BRAND_GREEN} stopOpacity="0.55" />
+        </SvgGradient>
+        <SvgGradient id="b1" x1="1" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={BLUE_DEEP} />
+          <Stop offset="1" stopColor={BLUE_LIGHT} />
+        </SvgGradient>
+      </Defs>
+      {/* soft lime layer behind the main green wave */}
+      <Path d="M0 0 H310 C292 52 240 102 186 108 C118 116 96 172 84 230 C74 282 42 318 0 336 Z" fill="url(#g2)" />
+      {/* main green wave, top-left */}
+      <Path d="M0 0 H262 C236 34 204 70 154 80 C94 92 62 132 52 190 C44 238 22 268 0 284 Z" fill="url(#g1)" />
+      {/* blue wave down the right side */}
+      <Path d="M400 0 V306 C372 324 330 306 330 264 C330 218 372 204 362 152 C352 102 302 92 302 42 C302 20 312 8 324 0 Z" fill="url(#b1)" />
+      {/* a few floating dots */}
+      <Circle cx="300" cy="300" r="7" fill={BRAND_GREEN} opacity="0.8" />
+      <Circle cx="78" cy="318" r="5" fill={BRAND_BLUE} opacity="0.7" />
+      <Circle cx="240" cy="40" r="4" fill="#fff" opacity="0.8" />
+    </Svg>
+  );
+}
+
 /**
- * The backdrop bubbles — glossy spheres you can grab, throw and bounce off each other
- * (see src/components/BubblePhysics.tsx). Anchors are px from the screen edges; a few
- * sit partly off-screen on purpose. Keep them clear of the form card at rest.
+ * The hero illustration — deliberately general (no solar/industry imagery): a laptop
+ * showing the desktop dashboard with a phone in front of it showing the mobile app
+ * (the same service on both screens), plus a chat bubble, a check badge and sparkles.
  */
-const BUBBLES: BubbleSpec[] = [
-  { size: 190, colors: ['#D2FF92', BRAND_GREEN], top: -70, right: -64, amp: 12, sway: -5 },
-  { size: 92, colors: ['#D2FF92', '#6BE000'], top: 250, left: -34, amp: 9, sway: 7 },
-  { size: 64, colors: ['#7FD3FA', '#1E9BE0'], bottom: 190, right: 18, amp: 8, sway: -5 },
-  { size: 150, colors: ['#D2FF92', BRAND_GREEN], bottom: -56, left: -52, amp: 11, sway: 6 },
-  { size: 44, colors: ['#D2FF92', '#6BE000'], top: 104, left: 22, amp: 8, sway: 5 },
-  { size: 54, colors: ['#7FD3FA', '#1E9BE0'], bottom: 92, left: 118, amp: 8, sway: -6 },
-];
+function Illustration({ width }: { width: number }) {
+  return (
+    <Svg width={width} height={width * (180 / 240)} viewBox="0 0 240 180">
+      <Defs>
+        <SvgGradient id="screen" x1="0" y1="0" x2="1" y2="0">
+          <Stop offset="0" stopColor="#2AA9E3" />
+          <Stop offset="1" stopColor={BLUE_DEEP} />
+        </SvgGradient>
+        <SvgGradient id="bubble" x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor="#9BF53A" />
+          <Stop offset="1" stopColor="#3DB800" />
+        </SvgGradient>
+        <SvgGradient id="area" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={BRAND_GREEN} stopOpacity="0.55" />
+          <Stop offset="1" stopColor={BRAND_GREEN} stopOpacity="0.05" />
+        </SvgGradient>
+      </Defs>
+      {/* ground shadow */}
+      <Ellipse cx="118" cy="168" rx="104" ry="7" fill={INK} opacity="0.08" />
+
+      {/* ── laptop: the desktop dashboard ── */}
+      <Rect x="14" y="44" width="160" height="104" rx="8" fill={INK} />
+      <Rect x="20" y="50" width="148" height="92" rx="3" fill="#fff" />
+      <Circle cx="94" cy="47" r="1.3" fill="#3b566a" />
+      {/* top bar */}
+      <Rect x="20" y="50" width="148" height="11" fill="url(#screen)" />
+      <Circle cx="27" cy="55.5" r="2" fill="#fff" opacity="0.9" />
+      <Rect x="33" y="54" width="24" height="3" rx="1.5" fill="#fff" opacity="0.85" />
+      <Circle cx="160" cy="55.5" r="2.4" fill="#fff" opacity="0.9" />
+      {/* sidebar */}
+      <Rect x="20" y="61" width="26" height="81" fill="#eef4f8" />
+      <Rect x="25" y="68" width="16" height="4" rx="2" fill={BRAND_BLUE} />
+      <Rect x="25" y="77" width="16" height="3" rx="1.5" fill="#c9d6de" />
+      <Rect x="25" y="85" width="16" height="3" rx="1.5" fill="#c9d6de" />
+      <Rect x="25" y="93" width="16" height="3" rx="1.5" fill="#c9d6de" />
+      {/* KPI cards */}
+      <Rect x="52" y="67" width="34" height="18" rx="3" fill="#E9FBD3" />
+      <Rect x="56" y="71" width="14" height="3" rx="1.5" fill="#3DB800" />
+      <Rect x="56" y="77" width="22" height="4" rx="2" fill={INK} opacity="0.7" />
+      <Rect x="90" y="67" width="34" height="18" rx="3" fill="#E3F4FC" />
+      <Rect x="94" y="71" width="14" height="3" rx="1.5" fill={BRAND_BLUE} />
+      <Rect x="94" y="77" width="22" height="4" rx="2" fill={INK} opacity="0.7" />
+      <Rect x="128" y="67" width="34" height="18" rx="3" fill="#E9FBD3" />
+      <Rect x="132" y="71" width="14" height="3" rx="1.5" fill="#3DB800" />
+      <Rect x="132" y="77" width="22" height="4" rx="2" fill={INK} opacity="0.7" />
+      {/* line chart */}
+      <Path d="M54 130 L70 118 L84 122 L100 104 L116 110 L132 96 L150 100 L150 136 L54 136 Z" fill="url(#area)" />
+      <Path d="M54 130 L70 118 L84 122 L100 104 L116 110 L132 96 L150 100" stroke="#3DB800" strokeWidth="2.2" fill="none" strokeLinejoin="round" strokeLinecap="round" />
+      <Line x1="52" y1="136" x2="162" y2="136" stroke="#dfe8ee" strokeWidth="1.2" />
+      {/* base */}
+      <Path d="M2 148 H186 L180 156 H8 Z" fill="#b9c9d3" />
+      <Rect x="80" y="148" width="28" height="3" rx="1.5" fill="#97abb8" />
+
+      {/* ── phone in front: the mobile app ── */}
+      <Rect x="160" y="68" width="52" height="96" rx="10" fill={INK} />
+      <Rect x="164" y="74" width="44" height="84" rx="6" fill="#fff" />
+      <Rect x="179" y="70.5" width="14" height="2" rx="1" fill="#3b566a" />
+      <Rect x="164" y="74" width="44" height="20" rx="6" fill="url(#screen)" />
+      <Rect x="164" y="86" width="44" height="8" fill="url(#screen)" />
+      <Circle cx="172" cy="84" r="3.5" fill="#fff" opacity="0.9" />
+      <Rect x="178" y="82" width="20" height="3" rx="1.5" fill="#fff" opacity="0.9" />
+      {/* bars */}
+      <Rect x="169" y="118" width="6" height="14" rx="1.5" fill={BRAND_BLUE} />
+      <Rect x="178" y="110" width="6" height="22" rx="1.5" fill={BRAND_GREEN} />
+      <Rect x="187" y="114" width="6" height="18" rx="1.5" fill={BRAND_BLUE} opacity="0.7" />
+      <Rect x="196" y="104" width="6" height="28" rx="1.5" fill="#3DB800" />
+      <Rect x="169" y="99" width="26" height="3" rx="1.5" fill="#c9d6de" />
+      <Rect x="169" y="139" width="34" height="4" rx="2" fill="#dfe8ee" />
+      <Rect x="169" y="147" width="22" height="4" rx="2" fill="#dfe8ee" />
+
+      {/* chat bubble, top-left */}
+      <Rect x="8" y="6" width="58" height="30" rx="15" fill="url(#bubble)" />
+      <Path d="M46 33 L58 46 L38 35 Z" fill="#3DB800" />
+      <Circle cx="25" cy="21" r="3.4" fill="#fff" />
+      <Circle cx="37" cy="21" r="3.4" fill="#fff" />
+      <Circle cx="49" cy="21" r="3.4" fill="#fff" />
+      {/* check badge, top-right */}
+      <Circle cx="210" cy="40" r="16" fill="#fff" stroke={BRAND_BLUE} strokeWidth="2.6" />
+      <Path d="M203 40 L208.5 45.5 L218 35" stroke={BLUE_DEEP} strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      {/* sparkles */}
+      <Path d="M150 6 L153 16 L163 19 L153 22 L150 32 L147 22 L137 19 L147 16 Z" fill={BRAND_GREEN} />
+      <Path d="M100 18 L102 23 L107 25 L102 27 L100 32 L98 27 L93 25 L98 23 Z" fill={BRAND_BLUE} opacity="0.85" />
+      <Circle cx="228" cy="96" r="3.5" fill={BRAND_GREEN} opacity="0.8" />
+    </Svg>
+  );
+}
+
+/** Bottom corner shapes: a green half-circle on the left, a blue wave on the right. */
+function BottomWaves({ width }: { width: number }) {
+  const h = 150;
+  return (
+    <Svg width={width} height={h} viewBox="0 0 400 150" preserveAspectRatio="none">
+      <Defs>
+        <SvgGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+          <Stop offset="0" stopColor={GREEN_LIGHT} />
+          <Stop offset="1" stopColor="#3DB800" />
+        </SvgGradient>
+        <SvgGradient id="bb" x1="1" y1="1" x2="0" y2="0">
+          <Stop offset="0" stopColor={BLUE_DEEP} />
+          <Stop offset="1" stopColor={BLUE_LIGHT} />
+        </SvgGradient>
+      </Defs>
+      <Path d="M400 150 V40 C376 30 352 58 346 88 C340 118 310 128 280 150 Z" fill="url(#bb)" opacity="0.9" />
+      <Path d="M0 150 V70 C40 66 92 94 108 150 Z" fill="url(#bg)" />
+    </Svg>
+  );
+}
 
 export default function LoginScreen() {
   const { signIn } = useAuth();
@@ -87,63 +223,122 @@ export default function LoginScreen() {
   const passwordRef = useRef<TextInput>(null);
 
   const { width } = useWindowDimensions();
-  // The shell gives the login no safe-area padding (so the backdrop can reach under the
+  // The shell gives the login no safe-area padding (so the waves can reach under the
   // status bar and nav bar); the insets come back here as padding on the CONTENT only.
   const insets = useSafeAreaInsets();
-  const compact = Dimensions.get('screen').height < 700;
-  const scrollRef = useRef<ScrollView>(null);
-  const cardY = useRef(0);
-  const scrollToForm = () => {
-    // After the keyboard has had a moment to open and the window to resize.
-    setTimeout(() => scrollRef.current?.scrollTo({ y: Math.max(0, cardY.current - 12), animated: true }), 180);
-  };
-
-  const logoWidth = Math.min(width - 96, compact ? 240 : 300);
-  const cardWidth = Math.min(width - 40, 460);
-
-  // ── draggable bubbles ──
   // Fixed physical screen size: the window height shrinks when the keyboard opens, and
-  // the bubbles' homes must not move with it.
+  // nothing on this screen may resize with it.
   const screen = Dimensions.get('screen');
-  const physics = useBubblePhysics(BUBBLES, screen.width, screen.height);
-  const scrollY = useRef(0);
-  const cardH = useRef(0);
-  /** The form card in screen coordinates — a touch on it must reach the inputs, never grab a bubble behind it. */
-  const onCard = (px: number, py: number) => {
-    const x0 = (screen.width - cardWidth) / 2;
-    const y0 = cardY.current - scrollY.current;
-    return px >= x0 - 4 && px <= x0 + cardWidth + 4 && py >= y0 - 4 && py <= y0 + cardH.current + 4;
-  };
-  const candidate = useRef(-1);
-  const pan = useRef(
-    PanResponder.create({
-      // Capture phase: runs before the inputs / ScrollView, and claims the touch ONLY on a bubble.
-      onStartShouldSetPanResponderCapture: (e) => {
-        const { pageX, pageY } = e.nativeEvent;
-        candidate.current = onCard(pageX, pageY) ? -1 : physics.hitTest(pageX, pageY);
-        return candidate.current >= 0;
-      },
-      onPanResponderGrant: (e) => {
-        if (candidate.current >= 0) physics.begin(candidate.current, e.nativeEvent.pageX, e.nativeEvent.pageY);
-      },
-      onPanResponderMove: (e) => physics.move(e.nativeEvent.pageX, e.nativeEvent.pageY),
-      onPanResponderRelease: () => physics.end(),
-      onPanResponderTerminate: () => physics.end(),
-      // once a bubble is held, don't let anything else steal the gesture
-      onPanResponderTerminationRequest: () => false,
-    }),
-  ).current;
-  const canSubmit = email.trim().length > 0 && password.length > 0 && !busy;
+  const compact = screen.height < 700;
+  const scrollRef = useRef<ScrollView>(null);
+  /** The view the scroll view fills — measured in the window to find the keyboard overlap. */
+  const frameRef = useRef<View>(null);
 
-  // ── entrance: the brand fades up, then the card ──
-  const logoIn = useRef(new Animated.Value(0)).current;
-  const cardIn = useRef(new Animated.Value(0)).current;
+  // ── fit-to-screen: no scroll when the keyboard is closed ──
+  // The hero takes whatever height is left after the form and the footer, so the page is
+  // exactly one screen tall. Every input here is measured with the keyboard CLOSED (the
+  // viewport only ever grows; the body/footer don't depend on the keyboard), so opening
+  // the keyboard never re-sizes anything — the layout rule above still holds.
+  const [viewportH, setViewportH] = useState(0);
+  const [bodyH, setBodyH] = useState(0);
+  const [footerH, setFooterH] = useState(0);
+  const bodyY = useRef(0);
+  const card = useRef({ y: 0, h: 0 });
+  const PAD_BOTTOM = 20 + insets.bottom;
+  const MIN_GAP = 12;
+  const minHero = insets.top + (compact ? 150 : 190);
+  const maxHero = insets.top + Math.min(screen.height * (compact ? 0.34 : 0.4), 380);
+  const measured = viewportH > 0 && bodyH > 0 && footerH > 0;
+  const heroHeight = Math.round(
+    measured
+      ? Math.max(minHero, Math.min(maxHero, viewportH - bodyH - footerH - PAD_BOTTOM - MIN_GAP))
+      : Math.min(screen.height * (compact ? 0.32 : 0.38), 360) + insets.top,
+  );
+  const contentFits = measured && heroHeight + bodyH + footerH + PAD_BOTTOM + MIN_GAP <= viewportH + 0.5;
+  const illoTop = insets.top + (compact ? 14 : 28);
+  // the illustration shrinks with the hero so it never gets cut off
+  const illoWidth = Math.max(120, Math.min(width * 0.6, compact ? 200 : 250, ((heroHeight - illoTop - 14) * 240) / 180));
+
+  // ── keyboard: lift the email/password card above it ──
+  // No KeyboardAvoidingView (it under-compensates on Android edge-to-edge — see
+  // src/components/KeyboardScreen.tsx). Instead: measure how far the keyboard reaches into
+  // the scroll view, add that much empty space at the END of the content (appending space
+  // never moves the inputs), and scroll so the whole card sits just above the keys.
+  const [kbOverlap, setKbOverlap] = useState(0);
+  // separate from the overlap: if Android resizes the window instead (adjustResize), the
+  // overlap is 0 but the keyboard is still up and the card still has to be lifted.
+  const [kbOpen, setKbOpen] = useState(false);
+  /** The scroll view's CURRENT height (shrinks if the window is resized for the keyboard). */
+  const curH = useRef(0);
+  const kbOpenRef = useRef(false);
+  const lastBodyH = useRef(0);
+  const liftForm = useCallback(
+    (overlap: number) => {
+      const visible = (curH.current || viewportH) - overlap;
+      const top = bodyY.current + card.current.y;
+      const bottom = top + card.current.h;
+      // the whole card if it fits above the keyboard, otherwise its top edge
+      const y = Math.max(0, Math.min(bottom - visible + 16, top - 8));
+      scrollRef.current?.scrollTo({ y, animated: true });
+    },
+    [viewportH],
+  );
   useEffect(() => {
-    Animated.stagger(120, [
-      Animated.timing(logoIn, { toValue: 1, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(cardIn, { toValue: 1, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const onShow = (e: { endCoordinates: { height: number; screenY: number } }) => {
+      if (!e.endCoordinates.height) return;
+      frameRef.current?.measureInWindow((_x, y, _w, h) => {
+        const overlap = Math.max(0, Math.min(y + h - e.endCoordinates.screenY, e.endCoordinates.height));
+        kbOpenRef.current = true;
+        setKbOpen(true);
+        setKbOverlap(overlap);
+        // after the spacer has been laid out
+        setTimeout(() => liftForm(overlap), 120);
+      });
+    };
+    const a = Keyboard.addListener(showEvt, onShow as never);
+    const b = Keyboard.addListener(hideEvt, () => {
+      kbOpenRef.current = false;
+      setKbOpen(false);
+      setKbOverlap(0);
+      if (lastBodyH.current) setBodyH(lastBodyH.current);
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    });
+    const c = Keyboard.addListener('keyboardDidChangeFrame' as never, ((e: { endCoordinates: { height: number; screenY: number } }) => {
+      if (e.endCoordinates.height > 0) onShow(e);
+    }) as never);
+    return () => {
+      a.remove();
+      b.remove();
+      c.remove();
+    };
+  }, [liftForm]);
+  const logoWidth = Math.min(width - 120, compact ? 190 : 230);
+  const formWidth = Math.min(width - 40, 460);
+
+  const canSubmit = email.trim().length > 0 && password.length > 0 && !busy;
+  const emailLooksValid = /^\S+@\S+\.\S+$/.test(email.trim());
+
+  // ── entrance: the hero fades in, then the form rises ──
+  const heroIn = useRef(new Animated.Value(0)).current;
+  const formIn = useRef(new Animated.Value(0)).current;
+  // ── a slow float on the illustration (native-driven, zero JS per frame) ──
+  const float = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.stagger(140, [
+      Animated.timing(heroIn, { toValue: 1, duration: 650, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(formIn, { toValue: 1, duration: 600, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
     ]).start();
-  }, [logoIn, cardIn]);
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(float, { toValue: 1, duration: 2200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(float, { toValue: 0, duration: 2200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [heroIn, formIn, float]);
 
   // ── button: a subtle press-in ──
   const press = useRef(new Animated.Value(0)).current;
@@ -163,363 +358,295 @@ export default function LoginScreen() {
     }
   }, [canSubmit, email, password, signIn]);
 
+  /** Underline field: label left, a small action right, the input, then the line. */
   const renderField = (
     f: Exclude<Field, null>,
     label: string,
-    icon: React.ReactNode,
+    right: React.ReactNode,
     input: React.ReactNode,
     extraStyle?: object,
   ) => (
-    <View style={extraStyle}>
-      <Text style={[local.label, focus === f && { color: BRAND_GREEN_DEEP }]}>{label}</Text>
-      <View style={local.fieldWrap}>
-        {/* focus glow — absolute, so turning it on/off never changes layout */}
-        <View pointerEvents="none" style={[local.glow, { opacity: focus === f ? 1 : 0 }]} />
-        <View style={[local.field, focus === f && { borderColor: BRAND_GREEN }]}>
-          {icon}
-          {input}
-        </View>
+    <View style={[local.field, extraStyle]}>
+      <View style={local.fieldTop}>
+        <Text style={[local.label, focus === f && { color: BRAND_GREEN_DEEP }]}>{label}</Text>
+        {right}
+      </View>
+      {input}
+      <View style={local.underline}>
+        {/* focus line — absolute, so turning it on/off never changes layout */}
+        <LinearGradient
+          pointerEvents="none"
+          colors={[BRAND_GREEN, BRAND_BLUE]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={[local.underlineFocus, { opacity: focus === f ? 1 : 0 }]}
+        />
       </View>
     </View>
   );
 
   return (
-    <KeyboardAvoidingView
-      style={local.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
-      {...pan.panHandlers}
-    >
-      {/* ── Backdrop: soft gradient, faint doodles, physics bubbles ── */}
-      <LinearGradient
-        pointerEvents="none"
-        colors={['#F8FEF1', '#E5F8D0', '#E3F3F9']}
-        locations={[0, 0.58, 1]}
-        start={{ x: 0.1, y: 0 }}
-        end={{ x: 0.9, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-      <ChatBackground tone="plain" color={BRAND_GREEN_MID} />
-      {BUBBLES.map((spec, i) => (
-        <PhysicsBubble
-          key={i}
-          spec={spec}
-          tx={physics.values[i].tx}
-          ty={physics.values[i].ty}
-          ix={physics.idle[i].ix}
-          iy={physics.idle[i].iy}
-          screenW={screen.width}
-          screenH={screen.height}
-        />
-      ))}
+    <View ref={frameRef} collapsable={false} style={local.screen}>
+      {/* Bottom corner shapes, pinned to the physical screen bottom (top offset, not
+          bottom: 0, so they don't ride up with the keyboard). */}
+      <View pointerEvents="none" style={[local.bottomShapes, { top: screen.height - 150 }]}>
+        <BottomWaves width={screen.width} />
+      </View>
 
       <ScrollView
         ref={scrollRef}
-        contentContainerStyle={[local.content, { paddingBottom: 24 + insets.bottom }]}
+        contentContainerStyle={[local.content, { paddingBottom: PAD_BOTTOM }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
-        onScroll={(e) => {
-          scrollY.current = e.nativeEvent.contentOffset.y;
+        // fits the screen exactly when the keyboard is closed, so no stray scroll/overscroll
+        scrollEnabled={kbOpen || !contentFits}
+        bounces={false}
+        overScrollMode="never"
+        onLayout={(e) => {
+          const h = e.nativeEvent.layout.height;
+          curH.current = h;
+          // only ever grows: the keyboard never shrinks this view, but be safe if it does
+          setViewportH((v) => (h > v ? h : v));
         }}
-        scrollEventThrottle={16}
       >
-        {/* ── Brand block: the logo straight on the backdrop ─────── */}
-        <Animated.View
-          style={[
-            local.brandBlock,
-            {
-              paddingTop: (compact ? 26 : 56) + insets.top,
-              paddingBottom: compact ? 28 : 40,
-              opacity: logoIn,
-              transform: [{ translateY: logoIn.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }],
-            },
-          ]}
-        >
-          <Image
-            source={LOGO}
-            resizeMode="contain"
-            style={{ width: logoWidth, height: logoWidth * LOGO_RATIO }}
-            accessibilityLabel="SoWash Maintenance Solutions"
-          />
-          <Text style={local.tagline}>SoWash Commercial App</Text>
-
-          {compact ? null : (
-            <View style={local.features}>
-              <View style={[local.dot, { backgroundColor: BRAND_GREEN_MID }]} />
-              <Text style={local.featureText}>AI-powered</Text>
-              <Text style={local.sep}>·</Text>
-              <View style={[local.dot, { backgroundColor: BRAND_BLUE }]} />
-              <Text style={local.featureText}>Live reports</Text>
-              <Text style={local.sep}>·</Text>
-              <View style={[local.dot, { backgroundColor: BRAND_GREEN_MID }]} />
-              <Text style={local.featureText}>Secure</Text>
-            </View>
-          )}
+        {/* ── Hero: waves + illustration ─────────────────────────── */}
+        <Animated.View style={[local.hero, { height: heroHeight, opacity: heroIn }]}>
+          <TopWaves width={width} height={heroHeight} />
+          <Animated.View
+            style={{
+              marginTop: illoTop,
+              transform: [{ translateY: float.interpolate({ inputRange: [0, 1], outputRange: [0, -8] }) }],
+            }}
+          >
+            <Illustration width={illoWidth} />
+          </Animated.View>
         </Animated.View>
 
-        {/* ── Form card ───────────────────────────────────────────── */}
+        {/* ── Brand + form ─────────────────────────────────────── */}
         <Animated.View
-          style={{
-            alignSelf: 'center',
-            opacity: cardIn,
-            transform: [{ translateY: cardIn.interpolate({ inputRange: [0, 1], outputRange: [26, 0] }) }],
-          }}
+          style={[
+            local.body,
+            {
+              width: formWidth,
+              opacity: formIn,
+              transform: [{ translateY: formIn.interpolate({ inputRange: [0, 1], outputRange: [24, 0] }) }],
+            },
+          ]}
           onLayout={(e) => {
-            cardY.current = e.nativeEvent.layout.y;
-            cardH.current = e.nativeEvent.layout.height;
+            bodyY.current = e.nativeEvent.layout.y;
+            lastBodyH.current = e.nativeEvent.layout.height;
+            // while the keyboard is open nothing may re-size (an error box appearing after a
+            // failed sign-in); the new height is applied when the keyboard closes.
+            if (!kbOpenRef.current) setBodyH(e.nativeEvent.layout.height);
           }}
         >
-          <View style={[local.card, { width: cardWidth }]}>
-            <View style={local.cardClip}>
-              {/* ── Header band: a quiet tinted top with the heading ── */}
-              <LinearGradient colors={['#EEF9DD', '#FFFFFF']} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={local.cardHead}>
-                <View style={local.headRow}>
-                  <View style={local.badge}>
-                    <ShieldCheck size={22} color={BRAND_GREEN_DEEP} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={local.eyebrow}>SIGN IN</Text>
-                    <Text style={local.welcome}>Welcome back</Text>
-                  </View>
-                </View>
-                <Text style={local.welcomeSub}>Use the email address SoWash set your account up with.</Text>
-              </LinearGradient>
+          <View style={local.brand}>
+            <Image
+              source={LOGO}
+              resizeMode="contain"
+              style={{ width: logoWidth, height: logoWidth * LOGO_RATIO }}
+              accessibilityLabel="SoWash Maintenance Solutions"
+            />
+            <Text style={local.tagline}>SoWash Commercial App</Text>
+          </View>
 
-              {/* ── Form body ── */}
-              <View style={local.cardBody}>
-                {error ? (
-                  <View style={local.errorBox}>
-                    <TriangleAlert size={16} color={palette.danger} />
-                    <Text style={local.errorText}>{error}</Text>
-                  </View>
-                ) : null}
+          <View
+            style={local.card}
+            onLayout={(e) => {
+              card.current = { y: e.nativeEvent.layout.y, h: e.nativeEvent.layout.height };
+            }}
+          >
+            <Text style={local.welcome}>Welcome back</Text>
+            <Text style={local.welcomeSub}>Sign in with the email SoWash set your account up with.</Text>
 
-                {renderField(
-                  'email',
-                  'Email address',
-                  <Mail size={18} color={focus === 'email' ? BRAND_GREEN_DEEP : palette.mutedLight} />,
-                  <TextInput
-                    style={local.input}
-                    placeholder="you@company.com"
-                    placeholderTextColor="#a3b4c0"
-                    value={email}
-                    onChangeText={setEmail}
-                    onFocus={() => {
-                      setFocus('email');
-                      scrollToForm();
-                    }}
-                    onBlur={() => setFocus((f) => (f === 'email' ? null : f))}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    keyboardType="email-address"
-                    textContentType="emailAddress"
-                    returnKeyType="next"
-                    editable={!busy}
-                    onSubmitEditing={() => passwordRef.current?.focus()}
-                  />,
-                )}
-
-                {renderField(
-                  'password',
-                  'Password',
-                  <Lock size={18} color={focus === 'password' ? BRAND_GREEN_DEEP : palette.mutedLight} />,
-                  <>
-                    <TextInput
-                      ref={passwordRef}
-                      style={local.input}
-                      placeholder="Enter your password"
-                      placeholderTextColor="#a3b4c0"
-                      value={password}
-                      onChangeText={setPassword}
-                      onFocus={() => {
-                        setFocus('password');
-                        scrollToForm();
-                      }}
-                      onBlur={() => setFocus((f) => (f === 'password' ? null : f))}
-                      secureTextEntry={!showPassword}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      textContentType="password"
-                      returnKeyType="go"
-                      editable={!busy}
-                      onSubmitEditing={submit}
-                    />
-                    <TouchableOpacity
-                      onPress={() => setShowPassword((v) => !v)}
-                      hitSlop={10}
-                      accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-                    >
-                      {showPassword ? (
-                        <EyeOff size={18} color={palette.mutedLight} />
-                      ) : (
-                        <Eye size={18} color={palette.mutedLight} />
-                      )}
-                    </TouchableOpacity>
-                  </>,
-                  { marginTop: 16 },
-                )}
-
-                {/* Dark ink button, lime accent — the brand colours as accents, not fills. */}
-                <Pressable
-                  onPress={submit}
-                  onPressIn={() => pressTo(1)}
-                  onPressOut={() => pressTo(0)}
-                  disabled={!canSubmit}
-                  style={[local.btnWrap, { opacity: canSubmit ? 1 : 0.5 }]}
-                >
-                  <Animated.View
-                    style={{ transform: [{ scale: press.interpolate({ inputRange: [0, 1], outputRange: [1, 0.98] }) }] }}
-                  >
-                    <LinearGradient
-                      colors={['#17506b', INK]}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 0, y: 1 }}
-                      style={local.btn}
-                    >
-                      <View pointerEvents="none" style={local.btnHighlight} />
-                      {busy ? (
-                        <ActivityIndicator color="#fff" />
-                      ) : (
-                        <>
-                          <Text style={local.btnText}>Sign in</Text>
-                          <View style={local.arrowChip}>
-                            <ArrowRight size={16} color={INK} />
-                          </View>
-                        </>
-                      )}
-                    </LinearGradient>
-                  </Animated.View>
-                </Pressable>
-
-                {/* The API is served over HTTPS (https://app.sowashusa.com), so this is true as written. */}
-                <View style={local.secureRow}>
-                  <Lock size={12} color="#7a93a3" />
-                  <Text style={local.secureText}>Encrypted connection</Text>
-                </View>
+            {error ? (
+              <View style={local.errorBox}>
+                <TriangleAlert size={16} color={palette.danger} />
+                <Text style={local.errorText}>{error}</Text>
               </View>
+            ) : null}
+
+            {renderField(
+              'email',
+              'Email',
+              emailLooksValid ? (
+                <View style={local.checkDot}>
+                  <Check size={11} color="#fff" strokeWidth={3} />
+                </View>
+              ) : null,
+              <TextInput
+                style={local.input}
+                placeholder="you@company.com"
+                placeholderTextColor="#a3b4c0"
+                value={email}
+                onChangeText={setEmail}
+                onFocus={() => setFocus('email')}
+                onBlur={() => setFocus((f) => (f === 'email' ? null : f))}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                textContentType="emailAddress"
+                returnKeyType="next"
+                editable={!busy}
+                onSubmitEditing={() => passwordRef.current?.focus()}
+              />,
+              { marginTop: 18 },
+            )}
+
+            {renderField(
+              'password',
+              'Password',
+              <TouchableOpacity
+                onPress={() => setShowPassword((v) => !v)}
+                hitSlop={10}
+                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+              >
+                <Text style={local.fieldAction}>{showPassword ? 'Hide' : 'Show'}</Text>
+              </TouchableOpacity>,
+              <TextInput
+                ref={passwordRef}
+                style={local.input}
+                placeholder="Enter your password"
+                placeholderTextColor="#a3b4c0"
+                value={password}
+                onChangeText={setPassword}
+                onFocus={() => setFocus('password')}
+                onBlur={() => setFocus((f) => (f === 'password' ? null : f))}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType="password"
+                returnKeyType="go"
+                editable={!busy}
+                onSubmitEditing={submit}
+              />,
+              { marginTop: 18 },
+            )}
+
+            {/* Pill gradient button, arrow on the right — as in the reference. */}
+            <Pressable
+              onPress={submit}
+              onPressIn={() => pressTo(1)}
+              onPressOut={() => pressTo(0)}
+              disabled={!canSubmit}
+              style={[local.btnWrap, { opacity: canSubmit ? 1 : 0.55 }]}
+            >
+              <Animated.View style={{ transform: [{ scale: press.interpolate({ inputRange: [0, 1], outputRange: [1, 0.98] }) }] }}>
+                <LinearGradient colors={['#2AA9E3', BLUE_DEEP]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={local.btn}>
+                  {busy ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <Text style={local.btnText}>Sign in</Text>
+                      <View style={local.arrowChip}>
+                        <ArrowRight size={17} color="#fff" />
+                      </View>
+                    </>
+                  )}
+                </LinearGradient>
+              </Animated.View>
+            </Pressable>
+
+            {/* The API is served over HTTPS (https://app.sowashusa.com), so this is true as written. */}
+            <View style={local.secureRow}>
+              <Lock size={12} color="#7a93a3" />
+              <Text style={local.secureText}>Encrypted connection</Text>
             </View>
           </View>
         </Animated.View>
 
         {/* Fills the rest of the screen so the footer sits at the bottom on tall phones. */}
-        <View style={{ flex: 1, minHeight: 16 }} />
-        <Text style={local.footnote}>
-          Accounts are created by SoWash. If you cannot sign in, contact your account manager.
-        </Text>
-        <Text style={local.powered}>
-          Powered By <Text style={local.poweredBrand}>iNOVAA.AI</Text>
-        </Text>
+        <View style={{ flex: 1, minHeight: MIN_GAP }} />
+        <View onLayout={(e) => setFooterH(e.nativeEvent.layout.height)}>
+          <Text style={local.footnote}>
+            Accounts are created by SoWash. If you cannot sign in, contact your account manager.
+          </Text>
+          <Text style={local.powered}>
+            Powered By <Text style={local.poweredBrand}>iNOVAA.AI</Text>
+          </Text>
+        </View>
+        {/* Room to scroll the card above the keyboard — appended at the END, so adding it
+            never moves the inputs. */}
+        {kbOverlap > 0 ? <View style={{ height: kbOverlap }} /> : null}
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const local = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: palette.bg },
+  screen: { flex: 1, backgroundColor: '#fff' },
   content: { flexGrow: 1 },
+  bottomShapes: { position: 'absolute', left: 0, right: 0, height: 150 },
 
-  brandBlock: { alignItems: 'center', paddingHorizontal: 24 },
-  tagline: { marginTop: 18, fontSize: 15, fontWeight: '600', color: '#2f5870', letterSpacing: 0.3 },
-  features: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 14 },
-  dot: { width: 5, height: 5, borderRadius: 2.5 },
-  featureText: { fontSize: 11, fontWeight: '700', letterSpacing: 0.9, color: '#4d6b7c', textTransform: 'uppercase' },
-  sep: { fontSize: 14, color: '#9db3c1', marginHorizontal: 2 },
+  hero: { width: '100%', alignItems: 'center', overflow: 'hidden' },
 
-  // Outer view carries the shadow; the inner one clips the tinted header band to the corners
-  // (one view can't both clip its children and cast an iOS shadow).
+  body: { alignSelf: 'center' },
+  brand: { alignItems: 'center', marginTop: 4 },
+  tagline: { marginTop: 10, fontSize: 14, fontWeight: '700', color: '#2f5870', letterSpacing: 0.4 },
+
   card: {
-    borderRadius: 26,
+    marginTop: 18,
     backgroundColor: '#fff',
-    shadowColor: INK,
-    shadowOpacity: 0.15,
-    shadowRadius: 26,
-    shadowOffset: { width: 0, height: 14 },
-    elevation: 10,
-  },
-  cardClip: {
-    borderRadius: 26,
-    overflow: 'hidden',
+    borderRadius: 24,
+    paddingHorizontal: 22,
+    paddingTop: 20,
+    paddingBottom: 18,
     borderWidth: 1,
-    borderColor: 'rgba(11,42,58,0.07)',
-    backgroundColor: '#fff',
-  },
-  cardHead: { paddingHorizontal: 22, paddingTop: 22, paddingBottom: 14 },
-  headRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  badge: {
-    width: 48,
-    height: 48,
-    borderRadius: 15,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#cfe9a8',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: BRAND_GREEN,
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
-  },
-  eyebrow: { fontSize: 10.5, fontWeight: '800', letterSpacing: 1.6, color: BRAND_GREEN_DEEP },
-  welcome: { fontSize: 24, fontWeight: '800', color: INK, letterSpacing: -0.3, marginTop: 1 },
-  welcomeSub: { fontSize: 13, lineHeight: 19, color: '#5b7384', marginTop: 12 },
-  cardBody: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 20 },
-
-  label: { fontSize: 12, fontWeight: '700', color: '#3b566a', letterSpacing: 0.3, marginBottom: 7 },
-  fieldWrap: { position: 'relative' },
-  glow: {
-    position: 'absolute',
-    top: -4,
-    left: -4,
-    right: -4,
-    bottom: -4,
-    borderRadius: 17,
-    borderWidth: 3,
-    borderColor: 'rgba(126,245,5,0.3)',
-  },
-  field: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    height: 52,
-    backgroundColor: '#fff',
-    borderRadius: 13,
-    borderWidth: 1.5,
-    borderColor: '#d5e3ec',
-    paddingHorizontal: 14,
-  },
-  input: { flex: 1, fontSize: 15.5, color: palette.ink, paddingVertical: 0 },
-  secureRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 14 },
-  secureText: { fontSize: 11.5, fontWeight: '600', color: '#7a93a3', letterSpacing: 0.2 },
-
-  btnWrap: {
-    marginTop: 22,
-    borderRadius: 16,
+    borderColor: 'rgba(11,42,58,0.06)',
     shadowColor: INK,
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
+    shadowOpacity: 0.12,
+    shadowRadius: 22,
     shadowOffset: { width: 0, height: 10 },
     elevation: 8,
+  },
+  welcome: { fontSize: 22, fontWeight: '800', color: INK, letterSpacing: -0.3 },
+  welcomeSub: { fontSize: 13, lineHeight: 19, color: '#5b7384', marginTop: 4 },
+
+  field: {},
+  fieldTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 18 },
+  label: { fontSize: 12, fontWeight: '700', color: '#7a93a3', letterSpacing: 0.4 },
+  fieldAction: { fontSize: 12, fontWeight: '700', color: BLUE_DEEP },
+  checkDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: GREEN_DARK,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  input: { fontSize: 16, color: palette.ink, paddingVertical: 8, paddingHorizontal: 0 },
+  underline: { height: 2, backgroundColor: '#dfe8ee', borderRadius: 1 },
+  underlineFocus: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 1 },
+
+  btnWrap: {
+    marginTop: 26,
+    borderRadius: 30,
+    shadowColor: BLUE_DEEP,
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 7,
   },
   btn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
     height: 54,
-    borderRadius: 16,
-    overflow: 'hidden',
+    borderRadius: 30,
   },
-  btnHighlight: { position: 'absolute', top: 0, left: 16, right: 16, height: 1, backgroundColor: 'rgba(255,255,255,0.22)' },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
+  btnText: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.4 },
   arrowChip: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: BRAND_GREEN,
+    position: 'absolute',
+    right: 8,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.22)',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  secureRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 14 },
+  secureText: { fontSize: 11.5, fontWeight: '600', color: '#7a93a3', letterSpacing: 0.2 },
 
   errorBox: {
     flexDirection: 'row',
@@ -530,22 +657,22 @@ const local = StyleSheet.create({
     borderColor: '#fecdd3',
     borderRadius: 14,
     padding: 12,
-    marginBottom: 14,
+    marginTop: 14,
   },
   errorText: { flex: 1, fontSize: 13, lineHeight: 19, fontWeight: '600', color: '#9f1239' },
   footnote: {
-    marginTop: 12,
-    paddingHorizontal: 36,
+    marginTop: 14,
+    paddingHorizontal: 40,
     fontSize: 12,
     lineHeight: 18,
     color: '#5f7d8f',
     textAlign: 'center',
   },
   powered: {
-    marginTop: 14,
+    marginTop: 12,
     fontSize: 12,
     fontWeight: '600',
-    color: '#5f7d8f',
+    color: INK,
     textAlign: 'center',
     letterSpacing: 0.3,
   },

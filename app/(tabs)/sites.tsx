@@ -20,6 +20,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Building2, Check, CircleAlert, Gauge, MapPin, Ruler, Zap } from 'lucide-react-native';
 import { palette } from '../../src/theme';
+import { tc, soft } from '../../src/themeEngine';
 import { useAccent } from '../../src/theme-context';
 import { useSiteContext, siteLocation } from '../../src/site-context';
 import { formatSystemSize } from '../../src/hooks';
@@ -66,8 +67,8 @@ export default function SitesScreen() {
   return (
     <View style={s.screen}>
       <View pointerEvents="none" style={s.wash}>
-        <View style={[s.blob, { backgroundColor: '#dbeafe', top: -90, left: -70, width: 260, height: 260 }]} />
-        <View style={[s.blob, { backgroundColor: '#fce7f3', top: 260, right: -100, width: 260, height: 260 }]} />
+        <View style={[s.blob, { backgroundColor: soft('#dbeafe'), top: -90, left: -70, width: 260, height: 260 }]} />
+        <View style={[s.blob, { backgroundColor: soft('#fce7f3'), top: 260, right: -100, width: 260, height: 260 }]} />
       </View>
 
       <PageHeader

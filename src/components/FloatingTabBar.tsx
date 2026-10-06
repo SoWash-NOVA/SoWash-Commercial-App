@@ -17,12 +17,14 @@ import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { palette } from '../theme';
-import { BRAND_GREEN_DEEP, BRAND_GREEN_MID, HEADER_STOPS } from '../brand';
+import { HEADER_GRADIENT } from '../brand';
 import { useChatOpen } from '../chat-focus';
 
 const IDLE = palette.mutedLight;
 const CIRCLE = 42;
 const CENTRE_CIRCLE = 60;
+/** Label/active colour — the deep end of the header gradient, readable on white. */
+const TAB_ACTIVE = '#1C9BE0';
 
 type IconComponent = React.ComponentType<{ size?: number; color?: string }>;
 
@@ -88,11 +90,24 @@ function RegularItem({
       <Animated.View
         style={[
           local.circle,
-          active && { backgroundColor: `${accent}16` },
+          active && local.circleActive,
           { transform: [{ scale }] },
         ]}
       >
-        <Icon size={20} color={active ? accent : IDLE} />
+        {/* selected: the header gradient (src/brand.ts) behind a white icon */}
+        {active ? (
+          <LinearGradient
+            pointerEvents="none"
+            colors={HEADER_GRADIENT.colors as unknown as [string, string, ...string[]]}
+            locations={HEADER_GRADIENT.locations as unknown as [number, number, ...number[]]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={local.circleFill}
+          />
+        ) : null}
+        <View style={local.iconLayer}>
+          <Icon size={20} color={active ? '#fff' : IDLE} />
+        </View>
       </Animated.View>
       <View style={local.labelSlot}>
         {active ? (
@@ -141,19 +156,22 @@ function CentreItem({
         <Animated.View
           style={[
             local.centreCircle,
-            { backgroundColor: HEADER_STOPS.end, transform: [{ scale: press }] },
+            { backgroundColor: TAB_ACTIVE, transform: [{ scale: press }] },
             active && local.centreCircleActive,
           ]}
         >
-          {/* the same green as the page headers (src/brand.ts) */}
+          {/* the same gradient as the page headers (src/brand.ts) */}
           <LinearGradient
             pointerEvents="none"
-            colors={[BRAND_GREEN_MID, HEADER_STOPS.mid]}
-            start={{ x: 0.2, y: 0 }}
-            end={{ x: 0.9, y: 1 }}
+            colors={HEADER_GRADIENT.colors as unknown as [string, string, ...string[]]}
+            locations={HEADER_GRADIENT.locations as unknown as [number, number, ...number[]]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
             style={local.centreFill}
           />
-          <Icon size={26} color="#fff" />
+          <View style={local.iconLayer}>
+            <Icon size={26} color="#fff" />
+          </View>
           {badge > 0 ? (
             <View style={local.badge}>
               <Text style={local.badgeText}>{badge > 9 ? '9+' : badge}</Text>
@@ -174,8 +192,9 @@ export default function FloatingTabBar({
   centreName,
   centreBadge = 0,
 }: Props) {
-  // Brand green (src/brand.ts), not the user-selectable accent: the bar matches the page headers.
-  const accent = BRAND_GREEN_DEEP;
+  // Brand blue (src/brand.ts), not the user-selectable accent: the bar matches the page headers —
+  // the selected item and the centre button wear the header gradient.
+  const accent = TAB_ACTIVE;
   const insets = useSafeAreaInsets();
   const chatOpen = useChatOpen();
 
@@ -277,6 +296,16 @@ const local = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  circleActive: {
+    shadowColor: TAB_ACTIVE,
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  circleFill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: CIRCLE / 2 },
+  // above the absolutely-positioned gradient fill on every platform
+  iconLayer: { zIndex: 1 },
   labelSlot: { height: 14, justifyContent: 'center', marginTop: 2 },
   label: { fontSize: 10, fontWeight: '800', letterSpacing: 0.2 },
 

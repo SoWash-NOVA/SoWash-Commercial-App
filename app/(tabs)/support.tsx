@@ -67,6 +67,7 @@ import {
   X,
 } from 'lucide-react-native';
 import { palette } from '../../src/theme';
+import { isDark, tc, ttc, soft } from '../../src/themeEngine';
 import { useAccent } from '../../src/theme-context';
 import { useSiteContext } from '../../src/site-context';
 import { photoUrl } from '../../src/api/client';
@@ -75,9 +76,10 @@ import { useAuth } from '../../src/auth/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import ChatBackground from '../../src/components/ChatBackground';
 import { shade } from '../../src/utils/color';
-import { HEADER_STOPS } from '../../src/brand';
+import { GREEN_STOPS } from '../../src/brand';
 import ChatHeaderBar from '../../src/components/ChatHeaderBar';
-import { ChatMessage, ChatRing, TeamReaction } from '../../src/api/types';
+import { ChatMessage, ChatRing, JobSummary, TeamReaction } from '../../src/api/types';
+import { takeChatAttach, useChatAttachRequest } from '../../src/chat-attach';
 // A tagged visit renders as a preview card — photos, site, crew — that opens
 // the whole visit in a sheet. See src/components/ChatVisitCard.tsx.
 import ChatVisitCard from '../../src/components/ChatVisitCard';
@@ -180,13 +182,32 @@ function buildRows(messages: ChatMessage[]): Row[] {
 
 export default function SupportScreen() {
   const [activeSite, setActiveSite] = useState<SiteLike | 'general' | null>(null);
+  // "Attach in chat" from a long-pressed visit (src/chat-attach.ts): open General with it tagged.
+  const attachSeq = useChatAttachRequest();
+  const [attachJob, setAttachJob] = useState<JobSummary | null>(null);
+  useEffect(() => {
+    const j = takeChatAttach();
+    if (j) {
+      setAttachJob(j);
+      setActiveSite('general');
+    }
+  }, [attachSeq]);
   // Inside a site's rings or the General chat: hide the tab bar; Android back returns to the site list (not Overview).
   useChatSurface(activeSite !== null, () => setActiveSite(null));
 
   // General holds the whole conversation. A site is NOT a chat: it shows that
   // site's ring history and lets the client ring again (see SiteRings).
   if (activeSite === 'general') {
-    return <ChatThread site={null} onBack={() => setActiveSite(null)} />;
+    return (
+      <ChatThread
+        site={null}
+        attach={attachJob}
+        onBack={() => {
+          setActiveSite(null);
+          setAttachJob(null);
+        }}
+      />
+    );
   }
   if (activeSite) {
     return (
@@ -215,8 +236,8 @@ function SiteList({ onOpen }: { onOpen: (site: SiteLike | 'general') => void }) 
   return (
     <View style={s.screen}>
       <View pointerEvents="none" style={s.wash}>
-        <View style={[s.blob, { backgroundColor: '#dbeafe', top: -90, left: -70, width: 240, height: 240 }]} />
-        <View style={[s.blob, { backgroundColor: '#ede9fe', top: 200, right: -100, width: 240, height: 240 }]} />
+        <View style={[s.blob, { backgroundColor: soft('#dbeafe'), top: -90, left: -70, width: 240, height: 240 }]} />
+        <View style={[s.blob, { backgroundColor: soft('#ede9fe'), top: 200, right: -100, width: 240, height: 240 }]} />
       </View>
 
       <ChatHeaderBar
@@ -234,7 +255,7 @@ function SiteList({ onOpen }: { onOpen: (site: SiteLike | 'general') => void }) 
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
           <TouchableOpacity style={s.siteRow} activeOpacity={0.85} onPress={() => onOpen('general')}>
-            <View style={[s.siteAvatar, { backgroundColor: '#0f172a' }]}>
+            <View style={[s.siteAvatar, { backgroundColor: isDark() ? '#2A3649' : '#0f172a' }]}>
               <Users size={18} color="#fff" />
             </View>
             <View style={{ flex: 1 }}>
@@ -348,8 +369,8 @@ function SiteRings({
         <View style={s.ringCardTop}>
           <Bell size={14} color={palette.muted} />
           <Text style={s.ringCardTime}>{stamp(item.created_at)}</Text>
-          <View style={[s.ringPill, { backgroundColor: meta.bg }]}>
-            <Text style={[s.ringPillText, { color: meta.color }]}>{meta.label}</Text>
+          <View style={[s.ringPill, { backgroundColor: tc(meta.bg) }]}>
+            <Text style={[s.ringPillText, { color: ttc(meta.color) }]}>{meta.label}</Text>
           </View>
         </View>
         {extra ? <Text style={s.ringCardNote}>{extra}</Text> : null}
@@ -435,7 +456,7 @@ function SiteRings({
           onPress={sendRing}
           disabled={sending || onCooldown}
           activeOpacity={0.85}
-          style={[s.ringMainBtn, { backgroundColor: onCooldown ? palette.border : HEADER_STOPS.mid }]}
+          style={[s.ringMainBtn, { backgroundColor: onCooldown ? palette.border : GREEN_STOPS.mid }]}
         >
           {sending ? <ActivityIndicator size="small" color="#fff" /> : <Bell size={18} color="#fff" />}
           <Text style={s.ringMainText}>{onCooldown ? 'Ring sent — wait a minute' : `Ring about ${name}`}</Text>
@@ -449,7 +470,16 @@ function SiteRings({
  * Thread
  * ==================================================================== */
 
-function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => void }) {
+function ChatThread({
+  site,
+  attach,
+  onBack,
+}: {
+  site: SiteLike | null;
+  /** A visit to link to the next message (from "Attach in chat" on a long-pressed visit). */
+  attach?: JobSummary | null;
+  onBack: () => void;
+}) {
   const { accent } = useAccent();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -496,8 +526,19 @@ function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => voi
 
   const [draft, setDraft] = useState('');
   const [photo, setPhoto] = useState<ChatPhotoInput | null>(null);
-  const [tagId, setTagId] = useState<number | null>(null);
+  const [tagId, setTagId] = useState<number | null>(attach?.schedule_id ?? null);
   const [tagOpen, setTagOpen] = useState(false);
+  // The attached visit itself — it may not be in the picker's own (latest 20) list.
+  const [attachedJob, setAttachedJob] = useState<JobSummary | null>(attach ?? null);
+  const inputRef = useRef<TextInput>(null);
+  useEffect(() => {
+    if (!attach) return;
+    setAttachedJob(attach);
+    setTagId(attach.schedule_id);
+    // straight to typing, like a WhatsApp reply
+    const t = setTimeout(() => inputRef.current?.focus(), 350);
+    return () => clearTimeout(t);
+  }, [attach]);
 
   const [ringing, setRinging] = useState(false);
   const [ringCooldownUntil, setRingCooldownUntil] = useState(0);
@@ -513,8 +554,10 @@ function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => voi
   const visits = useJobs({ scope: 'all', siteId: site?.id ?? undefined, limit: 20 });
   const visitList = useMemo(() => visits.data?.jobs ?? [], [visits.data]);
   const taggedVisit = useMemo(
-    () => visitList.find((v) => v.schedule_id === tagId) ?? null,
-    [visitList, tagId],
+    () =>
+      visitList.find((v) => v.schedule_id === tagId) ??
+      (attachedJob && attachedJob.schedule_id === tagId ? attachedJob : null),
+    [visitList, tagId, attachedJob],
   );
 
   const rows = useMemo(() => buildRows(messages), [messages]);
@@ -764,13 +807,25 @@ function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => voi
             ) : null}
 
             {taggedVisit ? (
-              <View style={s.attachChip}>
-                <CalendarDays size={13} color={accent} />
-                <Text style={s.attachText} numberOfLines={1}>
-                  {taggedVisit.site_name} · {formatDateOnly(taggedVisit.scheduled_date)}
-                </Text>
-                <TouchableOpacity onPress={() => setTagId(null)} hitSlop={8}>
-                  <X size={14} color={palette.muted} />
+              // WhatsApp-style "replying to" card: what this message will be linked to
+              <View style={[s.visitAttach, { borderLeftColor: accent }]}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <View style={s.visitAttachLabelRow}>
+                    <CalendarDays size={12} color={accent} />
+                    <Text style={[s.visitAttachLabel, { color: accent }]}>Linked visit</Text>
+                  </View>
+                  <Text style={s.visitAttachSite} numberOfLines={1}>
+                    {taggedVisit.site_name || 'Site'}
+                  </Text>
+                  <Text style={s.visitAttachMeta} numberOfLines={1}>
+                    {formatDateOnly(taggedVisit.scheduled_date)}
+                    {taggedVisit.service_number != null && String(taggedVisit.service_number) !== ''
+                      ? ` · Service #${taggedVisit.service_number}`
+                      : ''}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => setTagId(null)} hitSlop={10} accessibilityLabel="Remove linked visit">
+                  <X size={16} color={palette.muted} />
                 </TouchableOpacity>
               </View>
             ) : null}
@@ -793,9 +848,10 @@ function ChatThread({ site, onBack }: { site: SiteLike | null; onBack: () => voi
             </TouchableOpacity>
 
             <TextInput
+              ref={inputRef}
               value={draft}
               onChangeText={onDraftChange}
-              placeholder="Message SoWash…"
+              placeholder={taggedVisit ? 'Write about this visit…' : 'Message SoWash…'}
               placeholderTextColor={palette.mutedLight}
               style={s.pillInput}
               multiline
@@ -1324,6 +1380,28 @@ const s = StyleSheet.create({
   },
   attachThumb: { width: 20, height: 20, borderRadius: 5 },
   attachText: { flex: 1, fontSize: 11.5, color: palette.inkSoft, fontWeight: '600' },
+  // the linked visit above the composer (WhatsApp's reply preview)
+  visitAttach: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    width: '100%',
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderLeftWidth: 4,
+    paddingVertical: 8,
+    paddingLeft: 12,
+    paddingRight: 12,
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+  },
+  visitAttachLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  visitAttachLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 0.3 },
+  visitAttachSite: { fontSize: 14, fontWeight: '800', color: palette.ink, marginTop: 2 },
+  visitAttachMeta: { fontSize: 12, fontWeight: '600', color: palette.muted, marginTop: 1 },
 
   // Bordered, not a filled pill — matches the search/composer convention
   // used elsewhere in the app (white bg, thin border, moderate radius)

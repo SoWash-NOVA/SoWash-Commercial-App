@@ -12,14 +12,19 @@ export const BRAND_GREEN_DEEP = '#3E9F00';
 export const BRAND_GREEN_MID = '#5BC400';
 
 /**
- * The page-header gradient, top → bottom. GREEN leads (the logo's lime is the brand's main colour):
- * a deep forest green at the top — which is what the status-bar strip shows — brightening to a
- * vivid green at the bottom. White text sits on it, so even the brightest stop stays dark enough
- * to read (~2.6:1 — fine for the large bold titles; pure #7EF505 would be ~1.3:1). The full lime
- * and the sky blue come in as GLOWS (the header orbs), which is what makes it vivid.
+ * The page-header gradient, LEFT → RIGHT (2026-10-05): the logo's sky blue flowing into its lime
+ * through a soft aqua-mint, so a header reads as the logo's two colours in one sweep. The left end
+ * (where titles sit) is the deepest blue so white text reads; the right end stops a little short of
+ * the pure logo lime (#7EF505), on which white icons would vanish. Horizontal on purpose: the
+ * status-bar strip (src/top-inset-color.tsx) draws the same gradient, seamless at any height.
  */
-export const HEADER_STOPS = {
-  top: '#0A5A0E',
-  mid: '#1F8C0B',
-  end: '#3DB800',
+export const HEADER_GRADIENT = {
+  colors: ['#1C9BE0', BRAND_BLUE, '#4CC9A0', '#6BD81A'],
+  locations: [0, 0.4, 0.74, 1],
+} as const;
+
+/** The green the client ring button and the Team new-chat FAB use (the tab bars use HEADER_GRADIENT). */
+export const GREEN_STOPS = {
+  mid: '#4CB800',
+  end: '#6EDB00',
 };

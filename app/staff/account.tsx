@@ -11,6 +11,7 @@ import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useAuth, initialsOf } from '../../src/auth/AuthContext';
 import PageHeader from '../../src/components/PageHeader';
+import AppearanceCard from '../../src/components/AppearanceCard';
 
 /** "ci_admin" -> "CI Admin", for display. */
 function formatRole(role: string | null | undefined): string {
@@ -54,6 +55,8 @@ export default function StaffAccountScreen() {
             <Text style={local.rowText}>{user?.email || '—'}</Text>
           </View>
         </View>
+
+        <AppearanceCard style={{ marginBottom: 20 }} />
 
         <TouchableOpacity style={local.signOutBtn} activeOpacity={0.85} onPress={confirmSignOut}>
           <LogOut size={17} color={palette.danger} />

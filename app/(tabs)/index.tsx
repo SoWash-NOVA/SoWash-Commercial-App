@@ -3,8 +3,11 @@
 // Overview. Next visit, live site weather, the account-wide counts, and the
 // cleaning robot — in that order.
 //
-// Visual language matches the customer app's home screen: light wash
-// background, ambient colour blobs, white shadowed cards, bold numerals.
+// Look (2026-10-05 redesign): the SoWash logo's colours throughout — a blue→aqua
+// gradient "next visit" hero with a date tile, a "coming up" list, a weather strip,
+// a completion bar over four count tiles and the robot card (Maintenance and
+// Documentation are reached from the Account tab); sections cascade in (FadeInRow). Fixed brand colours, not the
+// user-selectable accent.
 //
 // The KPI row is deliberately labelled "across all sites" — /stats takes no
 // site_id, so it does not narrow with the switcher. Letting those numbers sit
@@ -57,12 +60,14 @@ import {
 import { useRouter } from 'expo-router';
 import {
   ArrowRight,
+  ArrowUpRight,
   Bell,
   Bot,
   CalendarCheck,
   CalendarClock,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   CircleAlert,
   Cloud,
   CloudDrizzle,
@@ -81,22 +86,16 @@ import {
   Wind,
   Wrench,
 } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { palette } from '../../src/theme';
-import { useAccent } from '../../src/theme-context';
+import FadeInRow from '../../src/components/FadeInRow';
+import { openJobActions } from '../../src/components/JobActions';
+import { tc } from '../../src/themeEngine';
 import { useAuth } from '../../src/auth/AuthContext';
 import { useSiteContext } from '../../src/site-context';
 import { useJobs, useStats, useUnreadCount, formatDateOnly, relativeDay } from '../../src/hooks';
 import { SiteSwitcher } from '../../src/components/SiteSwitcher';
 import PageHeader from '../../src/components/PageHeader';
-
-/* ------------------------------------------------------------------ *
- * Tile colours — fixed per-metric, same convention as the customer app's
- * MAIN MENU grid, so the four counts stay visually distinct at a glance.
- * ------------------------------------------------------------------ */
-const BLUE = '#3b82f6';
-const GREEN = '#10b981';
-const PURPLE = '#8b5cf6';
-const ORANGE = '#f59e0b';
 
 /* ------------------------------------------------------------------ *
  * Weather — Open-Meteo, live. WMO weather_code -> icon + label, per
@@ -205,10 +204,16 @@ function greeting(d = new Date()) {
   return 'Good evening,';
 }
 
+/** "2026-10-07" → { day: '7', month: 'OCT' } from the string parts (never through a Date — see CLAUDE.md §3). */
+function dateParts(value: string | null | undefined): { day: string; month: string } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? ''));
+  if (!m) return null;
+  const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  return { day: String(parseInt(m[3], 10)), month: months[parseInt(m[2], 10) - 1] };
+}
+
 export default function OverviewScreen() {
   const router = useRouter();
-  const { accent } = useAccent();
-  const accentColor = accent || BLUE;
   const { clientName, user } = useAuth();
   const { selectedSiteId, selectedSite } = useSiteContext();
 
@@ -240,8 +245,14 @@ export default function OverviewScreen() {
     await Promise.all([stats.refresh(), upcoming.refresh(), weather.refresh()]);
   };
 
-  const nextJob = upcoming.data?.jobs?.[0] ?? null;
+  const jobs = upcoming.data?.jobs ?? [];
+  const nextJob = jobs[0] ?? null;
+  const comingUp = jobs.slice(1, 4);
   const firstLoad = stats.loading && !stats.data && upcoming.loading && !upcoming.data;
+
+  const total = stats.data?.total ?? 0;
+  const done = stats.data?.completed ?? 0;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
   const goToJobs = (params: { scope: 'all' | 'past' | 'upcoming'; status?: string }) => {
     router.push({ pathname: '/jobs', params });
@@ -250,20 +261,15 @@ export default function OverviewScreen() {
   if (firstLoad) {
     return (
       <View style={[s.screen, s.centre]}>
-        <ActivityIndicator size="large" color={accentColor} />
+        <ActivityIndicator size="large" color={C.blue} />
       </View>
     );
   }
 
+  const nextParts = nextJob ? dateParts(nextJob.scheduled_date) : null;
+
   return (
     <View style={s.screen}>
-      {/* Ambient background wash — same three blobs as the customer app,
-          plain Views only, no extra package needed. */}
-      <View pointerEvents="none" style={s.wash}>
-        <View style={[s.blob, { backgroundColor: '#dbeafe', top: -90, left: -70, width: 280, height: 280 }]} />
-        <View style={[s.blob, { backgroundColor: '#ede9fe', top: 320, right: -110, width: 300, height: 300 }]} />
-        <View style={[s.blob, { backgroundColor: '#fce7f3', bottom: -60, left: -40, width: 260, height: 260 }]} />
-      </View>
 
       <PageHeader
         title={user?.firstName ? `${greeting()} ${user.firstName}` : greeting()}
@@ -278,8 +284,8 @@ export default function OverviewScreen() {
             activeOpacity={0.85}
             accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
           >
-            <Bell size={18} color={palette.inkSoft} />
-            {unread > 0 ? <View style={[s.bellDot, { backgroundColor: accentColor }]} /> : null}
+            <Bell size={18} color="#fff" />
+            {unread > 0 ? <View style={s.bellDot} /> : null}
           </TouchableOpacity>
         }
       >
@@ -289,193 +295,290 @@ export default function OverviewScreen() {
       <ScrollView
         contentContainerStyle={s.scroll}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accentColor} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.blue} />}
       >
-        {/* ── Next visit + live weather ──────────────────────────────── */}
-        <View style={s.topRow}>
-          <View style={s.topRowMain}>
-            <Text style={s.sectionTitle}>NEXT VISIT</Text>
-            {upcoming.loading && !upcoming.data ? (
-              <View style={[s.skeleton, { height: 176 }]} />
-            ) : nextJob ? (
-              <TouchableOpacity
-                onPress={() => router.push(`/job/${nextJob.schedule_id}`)}
-                activeOpacity={0.9}
-                style={[s.hero, { backgroundColor: accentColor }]}
+        {/* ── Next visit: the hero ─────────────────────────────────── */}
+        <FadeInRow index={0}>
+          <SectionHead title="Next visit" action="All visits" onAction={() => goToJobs({ scope: 'upcoming' })} />
+          {upcoming.loading && !upcoming.data ? (
+            <View style={[s.skeleton, { height: 196 }]} />
+          ) : nextJob ? (
+            <TouchableOpacity
+              onPress={() => router.push(`/job/${nextJob.schedule_id}`)}
+              onLongPress={() => openJobActions(nextJob)}
+              delayLongPress={300}
+              activeOpacity={0.92}
+              style={s.heroShadow}
+            >
+              <LinearGradient
+                colors={['#1689CC', '#2EAEE8']}
+                locations={[0, 1]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={s.hero}
               >
+                {/* decoration: soft rings + a lime glow */}
+                <View pointerEvents="none" style={[s.ring, { width: 220, height: 220, top: -90, right: -70 }]} />
+                <View pointerEvents="none" style={[s.ring, { width: 140, height: 140, top: -40, right: -20 }]} />
+
                 <View style={s.heroTop}>
-                  <CalendarCheck size={20} color="#fff" />
-                  <Text style={s.heroWhen}>{relativeDay(nextJob.scheduled_date) || 'Scheduled'}</Text>
+                  <View style={s.glassPill}>
+                    <CalendarCheck size={13} color="#fff" />
+                    <Text style={s.glassPillText}>{relativeDay(nextJob.scheduled_date) || 'Scheduled'}</Text>
+                  </View>
+                  {nextJob.service_number != null && String(nextJob.service_number) !== '' ? (
+                    <View style={s.glassPill}>
+                      <Text style={s.glassPillText}>Service #{nextJob.service_number}</Text>
+                    </View>
+                  ) : null}
                 </View>
-                <Text style={s.heroDate}>{formatDateOnly(nextJob.scheduled_date)}</Text>
-                <Text style={s.heroSite} numberOfLines={1}>
-                  {nextJob.site_name || 'Site'}
-                </Text>
-                <View style={s.heroFooter}>
-                  <Text style={s.heroLink}>View details</Text>
-                  <ArrowRight size={15} color="#fff" />
-                </View>
-              </TouchableOpacity>
-            ) : (
-              <Empty
-                icon={<Inbox size={20} color={palette.mutedLight} />}
-                title="Nothing scheduled"
-                body={
-                  selectedSite ? `No upcoming visits for ${selectedSite.site_name}.` : 'No upcoming visits yet.'
-                }
-                compact
-              />
-            )}
-          </View>
 
-          <View style={s.topRowSide}>
-            <Text style={s.sectionTitle}>SITE WEATHER</Text>
-            <WeatherCard
-              accent={accentColor}
-              siteName={selectedSite?.site_name}
-              hasSite={!!selectedSite}
-              hasCoords={!!coords}
-              loading={weather.loading}
-              error={weather.error}
-              data={weather.data}
-            />
-          </View>
-        </View>
-
-        {/* ── Counts — each tile is a link into /jobs, pre-filtered ────── */}
-        <Text style={s.sectionTitle}>ACROSS ALL SITES</Text>
-        {stats.error && !stats.data ? (
-          <Empty icon={<CircleAlert size={20} color={palette.danger} />} title="Could not load totals" body={stats.error} />
-        ) : (
-          <View style={s.grid}>
-            <StatTile
-              color={BLUE}
-              icon={<Layers size={19} color={BLUE} />}
-              label="Total"
-              value={stats.data?.total}
-              onPress={() => goToJobs({ scope: 'all' })}
-            />
-            <StatTile
-              color={GREEN}
-              icon={<CheckCircle2 size={19} color={GREEN} />}
-              label="Done"
-              value={stats.data?.completed}
-              onPress={() => goToJobs({ scope: 'past' })}
-            />
-            <StatTile
-              color={PURPLE}
-              icon={<Activity size={19} color={PURPLE} />}
-              label="Active"
-              value={stats.data?.inProgress}
-              onPress={() => goToJobs({ scope: 'all', status: 'in_progress' })}
-            />
-            <StatTile
-              color={ORANGE}
-              icon={<CalendarClock size={19} color={ORANGE} />}
-              label="Booked"
-              value={stats.data?.scheduled}
-              onPress={() => goToJobs({ scope: 'upcoming' })}
-            />
-          </View>
-        )}
-
-        {/* Maintenance lives on its own table with no site column, so it is a
-            separate destination rather than another filter on this screen. */}
-        <TouchableOpacity onPress={() => router.push('/maintenance')} style={s.linkTile} activeOpacity={0.9}>
-          <View style={[s.linkIcon, { backgroundColor: `${accentColor}14` }]}>
-            <Wrench size={18} color={accentColor} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.linkTitle}>Maintenance</Text>
-            <Text style={s.linkSub}>Contract tasks and checklists</Text>
-          </View>
-          <ArrowRight size={16} color={palette.mutedLight} />
-        </TouchableOpacity>
-
-        <TouchableOpacity onPress={() => router.push('/documentation' as never)} style={s.linkTile} activeOpacity={0.9}>
-          <View style={[s.linkIcon, { backgroundColor: `${accentColor}14` }]}>
-            <FileText size={18} color={accentColor} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.linkTitle}>Documentation</Text>
-            <Text style={s.linkSub}>SLD, TBT, safety training, inspections</Text>
-          </View>
-          <ArrowRight size={16} color={palette.mutedLight} />
-        </TouchableOpacity>
-
-        {/* ── Robot ──────────────────────────────────────────────────── */}
-        <Text style={s.sectionTitle}>CLEANING ROBOT</Text>
-        {!selectedSite ? (
-          <Empty
-            icon={<Bot size={20} color={palette.mutedLight} />}
-            title="Pick a site to control its robot"
-            body="Robot controls apply to one site at a time."
-            compact
-          />
-        ) : (
-          <View style={s.robotCard}>
-            <TouchableOpacity activeOpacity={0.85} onPress={toggleRobot} style={s.robotRow}>
-              <View style={[s.robotIcon, { backgroundColor: accentColor }]}>
-                <Bot size={22} color="#fff" />
-              </View>
-
-              <View style={{ flex: 1 }}>
-                <View style={s.robotTitleRow}>
-                  <Text style={s.robotTitle} numberOfLines={1}>
-                    {selectedSite.site_name || 'Solar Cleaning Robot'}
-                  </Text>
-                  <View style={s.statePill}>
-                    <Text style={s.statePillText}>{robotState}</Text>
+                <View style={s.heroMid}>
+                  {nextParts ? (
+                    <View style={s.heroDateBox}>
+                      <Text style={s.heroDay}>{nextParts.day}</Text>
+                      <Text style={s.heroMonth}>{nextParts.month}</Text>
+                    </View>
+                  ) : null}
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={s.heroDate}>{formatDateOnly(nextJob.scheduled_date)}</Text>
+                    <View style={s.heroSiteRow}>
+                      <MapPin size={13} color="rgba(255,255,255,0.95)" />
+                      <Text style={s.heroSite} numberOfLines={1}>
+                        {nextJob.site_name || 'Site'}
+                        {nextJob.city ? ` · ${nextJob.city}` : ''}
+                      </Text>
+                    </View>
                   </View>
                 </View>
-                <Text style={s.robotSub}>Model: Sowash-X1 Bot • Tap to control</Text>
-              </View>
 
-              <Animated.View style={[s.chevBtn, { transform: [{ rotate: chevronRotate }] }]}>
-                <ChevronDown size={16} color={palette.mutedLight} />
-              </Animated.View>
+                <View style={s.heroFooter}>
+                  <Text style={s.heroTeam} numberOfLines={1}>
+                    {nextJob.team_lead_name ? `Team lead · ${nextJob.team_lead_name}` : 'Tap to see the visit details'}
+                  </Text>
+                  <View style={s.heroGo}>
+                    <ArrowRight size={17} color={C.blue} />
+                  </View>
+                </View>
+              </LinearGradient>
             </TouchableOpacity>
+          ) : (
+            <Empty
+              icon={<Inbox size={20} color={C.blue} />}
+              title="Nothing scheduled"
+              body={selectedSite ? `No upcoming visits for ${selectedSite.site_name}.` : 'No upcoming visits yet.'}
+              compact
+            />
+          )}
+        </FadeInRow>
 
-            {robotOpen && (
-              <View style={s.robotPanel}>
-                <View style={s.robotMetaRow}>
-                  <RobotMeta label="BATTERY" value="82%" />
-                  <RobotMeta label="LAST RUN" value="2 days ago" />
-                  <RobotMeta label="PANELS" value="48" />
+        {/* ── Coming up: the next few after the hero ───────────────── */}
+        {comingUp.length > 0 ? (
+          <FadeInRow index={1}>
+            <SectionHead title="Coming up" />
+            <View style={s.listCard}>
+              {comingUp.map((job, i) => {
+                const p = dateParts(job.scheduled_date);
+                return (
+                  <TouchableOpacity
+                    key={job.schedule_id}
+                    activeOpacity={0.85}
+                    onPress={() => router.push(`/job/${job.schedule_id}`)}
+                    onLongPress={() => openJobActions(job)}
+                    delayLongPress={300}
+                    style={[s.upRow, i > 0 && s.upRowBorder]}
+                  >
+                    <LinearGradient colors={[tc(C.blueSoft), tc(C.blueSoft)]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.upDate}>
+                      <Text style={s.upDay}>{p?.day ?? '—'}</Text>
+                      <Text style={s.upMonth}>{p?.month ?? ''}</Text>
+                    </LinearGradient>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={s.upSite} numberOfLines={1}>
+                        {job.site_name || 'Site'}
+                      </Text>
+                      <Text style={s.upWhen} numberOfLines={1}>
+                        {relativeDay(job.scheduled_date) || formatDateOnly(job.scheduled_date)}
+                        {job.city ? ` · ${job.city}` : ''}
+                      </Text>
+                    </View>
+                    <ChevronRight size={17} color={palette.mutedLight} />
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </FadeInRow>
+        ) : null}
+
+        {/* ── Site weather ─────────────────────────────────────────── */}
+        <FadeInRow index={2}>
+          <SectionHead title="Site weather" />
+          <WeatherCard
+            siteName={selectedSite?.site_name}
+            hasSite={!!selectedSite}
+            hasCoords={!!coords}
+            loading={weather.loading}
+            error={weather.error}
+            data={weather.data}
+          />
+        </FadeInRow>
+
+        {/* ── Counts — each tile is a link into /jobs, pre-filtered ────── */}
+        <FadeInRow index={3}>
+          <SectionHead title="Across all sites" />
+          {stats.error && !stats.data ? (
+            <Empty icon={<CircleAlert size={20} color={palette.danger} />} title="Could not load totals" body={stats.error} />
+          ) : (
+            <>
+              {/* completion: done / total, both straight from /stats */}
+              <View style={s.progressCard}>
+                <View style={s.progressTop}>
+                  <View>
+                    <Text style={s.progressLabel}>Visits completed</Text>
+                    <Text style={s.progressValue}>{stats.data ? `${done} of ${total}` : '—'}</Text>
+                  </View>
+                  <Text style={s.progressPct}>{stats.data ? `${pct}%` : ''}</Text>
                 </View>
-
-                <View style={s.robotBtnRow}>
-                  <TouchableOpacity
-                    activeOpacity={0.85}
-                    onPress={() => setRobotState(robotState === 'Cleaning' ? 'Standby' : 'Cleaning')}
-                    style={[s.robotBtn, { backgroundColor: accentColor }]}
-                  >
-                    <Text style={s.robotBtnText}>
-                      {robotState === 'Cleaning' ? 'Stop cleaning' : 'Start cleaning'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    activeOpacity={0.85}
-                    onPress={() => setRobotState('Docking')}
-                    style={[s.robotBtn, s.robotBtnGhost]}
-                  >
-                    <Text style={[s.robotBtnText, { color: palette.inkSoft }]}>Return to dock</Text>
-                  </TouchableOpacity>
+                <View style={s.track}>
+                  <LinearGradient
+                    colors={['#2EAEE8', C.blue]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={[s.fill, { width: `${Math.max(pct, stats.data && done > 0 ? 4 : 0)}%` }]}
+                  />
                 </View>
               </View>
-            )}
-          </View>
-        )}
+
+              <View style={s.grid}>
+                <StatTile
+                  colors={[tc(C.blueSoft), tc(C.blueSoft)]}
+                  tint={C.blueSoft}
+                  color={C.blue}
+                  icon={<Layers size={18} color={C.blue} />}
+                  label="Total visits"
+                  value={stats.data?.total}
+                  onPress={() => goToJobs({ scope: 'all' })}
+                />
+                <StatTile
+                  colors={[tc(C.blueSoft), tc(C.blueSoft)]}
+                  tint={C.greenSoft}
+                  color={C.blue}
+                  icon={<CheckCircle2 size={18} color={C.blue} />}
+                  label="Completed"
+                  value={stats.data?.completed}
+                  onPress={() => goToJobs({ scope: 'past' })}
+                />
+                <StatTile
+                  colors={[tc(C.blueSoft), tc(C.blueSoft)]}
+                  tint={C.tealSoft}
+                  color={C.blue}
+                  icon={<Activity size={18} color={C.blue} />}
+                  label="In progress"
+                  value={stats.data?.inProgress}
+                  onPress={() => goToJobs({ scope: 'all', status: 'in_progress' })}
+                />
+                <StatTile
+                  colors={[tc(C.blueSoft), tc(C.blueSoft)]}
+                  tint={C.amberSoft}
+                  color={C.blue}
+                  icon={<CalendarClock size={18} color={C.blue} />}
+                  label="Booked"
+                  value={stats.data?.scheduled}
+                  onPress={() => goToJobs({ scope: 'upcoming' })}
+                />
+              </View>
+            </>
+          )}
+        </FadeInRow>
+
+        {/* ── Robot ──────────────────────────────────────────────────── */}
+        <FadeInRow index={4}>
+          <SectionHead title="Cleaning robot" />
+          {!selectedSite ? (
+            <Empty
+              icon={<Bot size={20} color={C.blue} />}
+              title="Pick a site to control its robot"
+              body="Robot controls apply to one site at a time."
+              compact
+            />
+          ) : (
+            <View style={s.robotCard}>
+              <TouchableOpacity activeOpacity={0.85} onPress={toggleRobot} style={s.robotRow}>
+                <LinearGradient colors={[tc(C.blueSoft), tc(C.blueSoft)]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.robotIcon}>
+                  <Bot size={22} color={C.blue} />
+                </LinearGradient>
+
+                <View style={{ flex: 1 }}>
+                  <View style={s.robotTitleRow}>
+                    <Text style={s.robotTitle} numberOfLines={1}>
+                      {selectedSite.site_name || 'Solar Cleaning Robot'}
+                    </Text>
+                    <View style={[s.statePill, robotState === 'Cleaning' && { backgroundColor: tc(C.greenSoft) }]}>
+                      <View style={[s.stateDot, { backgroundColor: robotState === 'Cleaning' ? C.green : palette.mutedLight }]} />
+                      <Text style={[s.statePillText, robotState === 'Cleaning' && { color: C.green }]}>{robotState}</Text>
+                    </View>
+                  </View>
+                  <Text style={s.robotSub}>Model: Sowash-X1 Bot • Tap to control</Text>
+                </View>
+
+                <Animated.View style={[s.chevBtn, { transform: [{ rotate: chevronRotate }] }]}>
+                  <ChevronDown size={16} color={palette.mutedLight} />
+                </Animated.View>
+              </TouchableOpacity>
+
+              {robotOpen && (
+                <View style={s.robotPanel}>
+                  <View style={s.robotMetaRow}>
+                    <RobotMeta label="BATTERY" value="82%" />
+                    <RobotMeta label="LAST RUN" value="2 days ago" />
+                    <RobotMeta label="PANELS" value="48" />
+                  </View>
+
+                  <View style={s.robotBtnRow}>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => setRobotState(robotState === 'Cleaning' ? 'Standby' : 'Cleaning')}
+                      style={{ flex: 1 }}
+                    >
+                      <LinearGradient colors={['#33B8F0', C.blue]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={s.robotBtn}>
+                        <Text style={s.robotBtnText}>{robotState === 'Cleaning' ? 'Stop cleaning' : 'Start cleaning'}</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => setRobotState('Docking')}
+                      style={[s.robotBtn, s.robotBtnGhost]}
+                    >
+                      <Text style={[s.robotBtnText, { color: palette.inkSoft }]}>Return to dock</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </View>
+          )}
+        </FadeInRow>
       </ScrollView>
     </View>
   );
 }
 
+/** Section title: a small blue→lime bar, the title, and an optional link on the right. */
+function SectionHead({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
+  return (
+    <View style={s.sectionHead}>
+      <LinearGradient colors={[C.blue, C.blue]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={s.sectionBar} />
+      <Text style={s.sectionTitle}>{title}</Text>
+      {action && onAction ? (
+        <TouchableOpacity onPress={onAction} hitSlop={8} style={s.sectionAction}>
+          <Text style={s.sectionActionText}>{action}</Text>
+          <ChevronRight size={14} color={C.blue} />
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+}
+
 function WeatherCard({
-  accent,
   siteName,
   hasSite,
   hasCoords,
@@ -483,7 +586,6 @@ function WeatherCard({
   error,
   data,
 }: {
-  accent: string;
   siteName?: string | null;
   hasSite: boolean;
   hasCoords: boolean;
@@ -494,7 +596,7 @@ function WeatherCard({
   if (!hasSite) {
     return (
       <View style={s.weatherEmpty}>
-        <MapPin size={17} color={palette.mutedLight} />
+        <MapPin size={17} color={C.blue} />
         <Text style={s.weatherEmptyText}>Pick a site to see local weather</Text>
       </View>
     );
@@ -503,7 +605,7 @@ function WeatherCard({
   if (!hasCoords) {
     return (
       <View style={s.weatherEmpty}>
-        <MapPin size={17} color={palette.mutedLight} />
+        <MapPin size={17} color={C.blue} />
         <Text style={s.weatherEmptyText}>No location on file for {siteName || 'this site'}</Text>
       </View>
     );
@@ -511,8 +613,8 @@ function WeatherCard({
 
   if (loading && !data) {
     return (
-      <View style={[s.weatherCard, s.centre]}>
-        <ActivityIndicator size="small" color={accent} />
+      <View style={[s.weatherEmpty, { minHeight: 82 }]}>
+        <ActivityIndicator size="small" color={C.blue} />
       </View>
     );
   }
@@ -531,37 +633,45 @@ function WeatherCard({
   const { Icon, label } = weatherMeta(data.code);
 
   return (
-    <View style={s.weatherCard}>
-      <View style={s.weatherTop}>
-        <Icon size={24} color={accent} />
-        <Text style={[s.weatherTemp, { color: accent }]}>{Math.round(data.tempC)}°</Text>
-      </View>
-      <Text style={s.weatherLabel} numberOfLines={1}>
-        {label}
-      </Text>
-      <Text style={s.weatherFeels}>Feels {Math.round(data.feelsLikeC)}°</Text>
-      <View style={s.weatherDivider} />
-      <View style={s.weatherStatsRow}>
-        <View style={s.weatherStat}>
-          <Droplets size={12} color={palette.mutedLight} />
-          <Text style={s.weatherStatText}>{Math.round(data.humidity)}%</Text>
+    <LinearGradient colors={[tc('#FFFFFF'), tc('#FFFFFF')]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.weatherCard}>
+      <LinearGradient colors={[tc(C.blueSoft), tc(C.blueSoft)]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.weatherIcon}>
+        <Icon size={26} color={C.blue} />
+      </LinearGradient>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={s.weatherTempRow}>
+          <Text style={s.weatherTemp}>{Math.round(data.tempC)}°</Text>
+          <Text style={s.weatherFeels}>Feels {Math.round(data.feelsLikeC)}°</Text>
         </View>
-        <View style={s.weatherStat}>
-          <Wind size={12} color={palette.mutedLight} />
-          <Text style={s.weatherStatText}>{Math.round(data.windKph)} km/h</Text>
+        <Text style={s.weatherLabel} numberOfLines={1}>
+          {label}
+          {siteName ? ` · ${siteName}` : ''}
+        </Text>
+      </View>
+      <View style={s.weatherChips}>
+        <View style={s.weatherChip}>
+          <Droplets size={12} color={C.blue} />
+          <Text style={s.weatherChipText}>{Math.round(data.humidity)}%</Text>
+        </View>
+        <View style={s.weatherChip}>
+          <Wind size={12} color={C.blue} />
+          <Text style={s.weatherChipText}>{Math.round(data.windKph)} km/h</Text>
         </View>
       </View>
-    </View>
+    </LinearGradient>
   );
 }
 
 function StatTile({
+  colors,
+  tint,
   color,
   icon,
   label,
   value,
   onPress,
 }: {
+  colors: [string, string];
+  tint: string;
   color: string;
   icon: React.ReactNode;
   label: string;
@@ -569,18 +679,20 @@ function StatTile({
   onPress?: () => void;
 }) {
   return (
-    <TouchableOpacity
-      activeOpacity={0.8}
-      onPress={onPress}
-      disabled={!onPress}
-      style={[s.tile, { borderColor: `${color}33` }]}
-    >
-      <View style={[s.tileIcon, { backgroundColor: `${color}14` }]}>{icon}</View>
-      <Text style={[s.tileValue, { color }]}>{value ?? '—'}</Text>
+    <TouchableOpacity activeOpacity={0.85} onPress={onPress} disabled={!onPress} style={s.tile}>
+      {/* a soft tinted circle in the corner */}
+      <View style={s.tileTop}>
+        <LinearGradient colors={colors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.tileIcon}>
+          {icon}
+        </LinearGradient>
+        <ArrowUpRight size={15} color={color} />
+      </View>
+      <Text style={s.tileValue}>{value ?? '—'}</Text>
       <Text style={s.tileLabel}>{label}</Text>
     </TouchableOpacity>
   );
 }
+
 
 function RobotMeta({ label, value }: { label: string; value: string }) {
   return (
@@ -603,153 +715,263 @@ function Empty({
   compact?: boolean;
 }) {
   return (
-    <View style={[s.empty, compact && { paddingVertical: 30 }]}>
-      {icon}
+    <View style={[s.empty, compact && { paddingVertical: 28 }]}>
+      <View style={s.emptyIcon}>{icon}</View>
       <Text style={s.emptyTitle}>{title}</Text>
       {body ? <Text style={s.emptyBody}>{body}</Text> : null}
     </View>
   );
 }
 
+/* Brand-harmonious colours for this screen — the logo's blue and green, plus a teal
+   between them and one warm amber so the four counts stay distinct at a glance. Fixed,
+   not the user-selectable accent, like the headers. */
+const C = {
+  blue: '#1C9BE0',
+  blueSoft: '#E6F5FD',
+  green: '#3E9F00',
+  greenSoft: '#EEFAE0',
+  teal: '#0E9F9A',
+  tealSoft: '#E0F6F4',
+  amber: '#E08E0B',
+  amberSoft: '#FDF1DA',
+};
+
 const CARD_SHADOW = {
-  shadowColor: '#0f172a',
-  shadowOpacity: 0.06,
+  shadowColor: '#0b2a3a',
+  shadowOpacity: 0.07,
   shadowRadius: 18,
   shadowOffset: { width: 0, height: 8 },
-  elevation: 2,
+  elevation: 3,
 };
 
 const s = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#f6f8ff' },
+  screen: { flex: 1, backgroundColor: '#F4F7FA' },
   centre: { alignItems: 'center', justifyContent: 'center' },
   wash: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  blob: { position: 'absolute', borderRadius: 999, opacity: 0.55 },
+  blob: { position: 'absolute', borderRadius: 999, opacity: 0.6 },
 
   // 140 clears the floating tab bar (its own height + the raised centre
   // button + safe-area inset) — without this the last card sits behind it
   // and, since there's nothing below to scroll past, is unreachable.
-  scroll: { paddingHorizontal: 18, paddingTop: 8, paddingBottom: 140 },
+  scroll: { paddingHorizontal: 18, paddingTop: 4, paddingBottom: 140 },
 
-  headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  greeting: { fontSize: 13, color: palette.muted, fontWeight: '600' },
-  client: { fontSize: 22, fontWeight: '900', color: palette.ink, marginTop: 2 },
   bellBtn: {
     width: 42,
     height: 42,
     borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellDot: {
+    position: 'absolute',
+    top: 9,
+    right: 10,
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    backgroundColor: '#FF5A5F',
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
+
+  sectionHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 24, marginBottom: 12 },
+  sectionBar: { width: 4, height: 16, borderRadius: 2 },
+  sectionTitle: { flex: 1, fontSize: 16, fontWeight: '800', color: palette.ink, letterSpacing: -0.1 },
+  sectionAction: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  sectionActionText: { fontSize: 12.5, fontWeight: '800', color: C.blue },
+
+  // hero
+  heroShadow: {
+    borderRadius: 26,
+    shadowColor: '#1C9BE0',
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 8,
+  },
+  hero: { borderRadius: 26, padding: 18, overflow: 'hidden' },
+  ring: { position: 'absolute', borderRadius: 999, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.22)' },
+  heroTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  glassPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  glassPillText: { color: '#fff', fontSize: 11.5, fontWeight: '800', letterSpacing: 0.3 },
+  heroMid: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 16 },
+  heroDateBox: {
+    width: 62,
+    height: 66,
+    borderRadius: 18,
     backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  heroDay: { fontSize: 26, fontWeight: '900', color: C.blue, lineHeight: 30 },
+  heroMonth: { fontSize: 11, fontWeight: '900', color: palette.muted, letterSpacing: 1 },
+  heroDate: {
+    color: '#fff',
+    fontSize: 21,
+    fontWeight: '900',
+    textShadowColor: 'rgba(8,60,95,0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 5,
+  },
+  heroSiteRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 5 },
+  heroSite: { flex: 1, color: '#fff', fontSize: 13.5, fontWeight: '700' },
+  heroFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 18,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.28)',
+  },
+  heroTeam: { flex: 1, color: 'rgba(255,255,255,0.95)', fontSize: 12.5, fontWeight: '700' },
+  heroGo: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+
+  // coming up
+  listCard: { backgroundColor: '#fff', borderRadius: 22, paddingHorizontal: 14, ...CARD_SHADOW },
+  upRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
+  upRowBorder: { borderTopWidth: 1, borderTopColor: '#EEF3F7' },
+  upDate: { width: 46, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  upDay: { fontSize: 17, fontWeight: '900', color: C.blue, lineHeight: 20 },
+  upMonth: { fontSize: 9.5, fontWeight: '900', color: palette.muted, letterSpacing: 0.8 },
+  upSite: { fontSize: 14.5, fontWeight: '800', color: palette.ink },
+  upWhen: { fontSize: 12, fontWeight: '600', color: palette.muted, marginTop: 2 },
+
+  // weather
+  weatherCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    borderRadius: 22,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#EDF2F6',
     ...CARD_SHADOW,
   },
-  bellDot: { position: 'absolute', top: 9, right: 10, width: 8, height: 8, borderRadius: 4 },
-
-  sectionTitle: {
-    fontSize: 11,
-    fontWeight: '900',
-    color: palette.mutedLight,
-    letterSpacing: 0.8,
-    marginTop: 22,
-    marginBottom: 10,
+  weatherIcon: { width: 54, height: 54, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  weatherTempRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  weatherTemp: { fontSize: 28, fontWeight: '900', color: palette.ink },
+  weatherFeels: { fontSize: 11.5, fontWeight: '700', color: palette.mutedLight },
+  weatherLabel: { fontSize: 12.5, fontWeight: '700', color: palette.muted, marginTop: 1 },
+  weatherChips: { gap: 6 },
+  weatherChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderWidth: 1,
+    borderColor: '#E3EEF4',
   },
-
-  topRow: { flexDirection: 'row', gap: 12, alignItems: 'stretch' },
-  topRowMain: { flex: 1.3 },
-  topRowSide: { flex: 1, minWidth: 0 },
-
-  hero: { borderRadius: 24, padding: 18, flex: 1, justifyContent: 'space-between' },
-  heroTop: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-  heroWhen: { color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '800', letterSpacing: 0.4 },
-  heroDate: { color: '#fff', fontSize: 24, fontWeight: '900' },
-  heroSite: { color: 'rgba(255,255,255,0.9)', fontSize: 13.5, fontWeight: '700', marginTop: 4 },
-  heroFooter: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16 },
-  heroLink: { color: '#fff', fontSize: 13, fontWeight: '800' },
-
-  weatherCard: { backgroundColor: '#fff', borderRadius: 24, padding: 16, flex: 1, ...CARD_SHADOW },
-  weatherTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  weatherTemp: { fontSize: 24, fontWeight: '900' },
-  weatherLabel: { fontSize: 13, fontWeight: '800', color: palette.ink, marginTop: 8 },
-  weatherFeels: { fontSize: 11, fontWeight: '600', color: palette.mutedLight, marginTop: 2 },
-  weatherDivider: { height: 1, backgroundColor: '#eef2f7', marginTop: 12, marginBottom: 10 },
-  weatherStatsRow: { flexDirection: 'row', gap: 12 },
-  weatherStat: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  weatherStatText: { fontSize: 11, fontWeight: '700', color: palette.mutedLight },
+  weatherChipText: { fontSize: 11, fontWeight: '800', color: palette.inkSoft },
   weatherEmpty: {
-    flex: 1,
     backgroundColor: '#fff',
-    borderRadius: 24,
-    padding: 14,
+    borderRadius: 22,
+    padding: 16,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     ...CARD_SHADOW,
   },
-  weatherEmptyText: { fontSize: 11.5, fontWeight: '700', color: palette.mutedLight, textAlign: 'center', lineHeight: 16 },
+  weatherEmptyText: { flexShrink: 1, fontSize: 12.5, fontWeight: '700', color: palette.muted, lineHeight: 17 },
+
+  // progress + tiles
+  progressCard: { backgroundColor: '#fff', borderRadius: 22, padding: 16, marginBottom: 12, ...CARD_SHADOW },
+  progressTop: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
+  progressLabel: { fontSize: 12, fontWeight: '700', color: palette.muted },
+  progressValue: { fontSize: 18, fontWeight: '900', color: palette.ink, marginTop: 2 },
+  progressPct: { fontSize: 22, fontWeight: '900', color: C.blue },
+  track: { height: 10, borderRadius: 5, backgroundColor: '#EDF3F7', marginTop: 12, overflow: 'hidden' },
+  fill: { height: 10, borderRadius: 5 },
 
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   tile: {
     flexBasis: '47%',
     flexGrow: 1,
     backgroundColor: '#fff',
-    borderRadius: 20,
-    borderWidth: 1,
+    borderRadius: 22,
     padding: 15,
+    overflow: 'hidden',
     ...CARD_SHADOW,
   },
-  tileIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  tileValue: { fontSize: 24, fontWeight: '900', marginTop: 14 },
-  tileLabel: { fontSize: 11.5, fontWeight: '700', color: palette.mutedLight, marginTop: 2 },
+  tileBlob: { position: 'absolute', width: 96, height: 96, borderRadius: 48, top: -36, right: -30 },
+  tileTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  tileIcon: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  tileValue: { fontSize: 28, fontWeight: '900', color: palette.ink, marginTop: 14 },
+  tileLabel: { fontSize: 12, fontWeight: '700', color: palette.muted, marginTop: 1 },
 
-  linkTile: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 14,
-    marginTop: 14,
-    ...CARD_SHADOW,
-  },
-  linkIcon: { width: 40, height: 40, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  linkTitle: { fontSize: 14.5, fontWeight: '800', color: palette.ink },
-  linkSub: { fontSize: 12, fontWeight: '600', color: palette.mutedLight, marginTop: 2 },
-
+  // robot
   robotCard: { backgroundColor: '#fff', borderRadius: 22, padding: 16, ...CARD_SHADOW },
   robotRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   robotIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   robotTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   robotTitle: { flex: 1, fontSize: 15, fontWeight: '800', color: palette.ink },
-  statePill: { backgroundColor: '#f1f5f9', borderRadius: 10, paddingHorizontal: 9, paddingVertical: 4 },
+  statePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 10,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  stateDot: { width: 6, height: 6, borderRadius: 3 },
   statePillText: { fontSize: 10.5, fontWeight: '800', color: palette.muted },
   robotSub: { fontSize: 12, color: palette.mutedLight, marginTop: 4, fontWeight: '600' },
   chevBtn: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: '#f8fafc',
+    backgroundColor: '#F4F8FB',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  robotPanel: { marginTop: 16, borderTopWidth: 1, borderTopColor: '#eef2f7', paddingTop: 14 },
+  robotPanel: { marginTop: 16, borderTopWidth: 1, borderTopColor: '#EEF3F7', paddingTop: 14 },
   robotMetaRow: { flexDirection: 'row' },
   robotMetaLabel: { fontSize: 9.5, fontWeight: '800', color: palette.mutedLight, letterSpacing: 0.7 },
   robotMetaValue: { fontSize: 14, fontWeight: '800', color: palette.ink, marginTop: 3 },
   robotBtnRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
   robotBtn: { flex: 1, paddingVertical: 12, borderRadius: 14, alignItems: 'center' },
-  robotBtnGhost: { backgroundColor: '#f1f5f9' },
+  robotBtnGhost: { backgroundColor: '#F1F5F9' },
   robotBtnText: { fontSize: 13, fontWeight: '800', color: '#fff' },
 
   empty: {
     alignItems: 'center',
     gap: 6,
     backgroundColor: '#fff',
-    borderRadius: 20,
+    borderRadius: 22,
     paddingVertical: 26,
     paddingHorizontal: 20,
     ...CARD_SHADOW,
   },
-  emptyTitle: { fontSize: 14, fontWeight: '800', color: palette.ink, marginTop: 2 },
-  emptyBody: { fontSize: 12.5, lineHeight: 18, color: palette.mutedLight, textAlign: 'center' },
+  emptyIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: C.blueSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
+  emptyTitle: { fontSize: 14.5, fontWeight: '800', color: palette.ink, marginTop: 2 },
+  emptyBody: { fontSize: 12.5, lineHeight: 18, color: palette.muted, textAlign: 'center' },
 
-  skeleton: { borderRadius: 20, backgroundColor: '#fff', ...CARD_SHADOW },
+  skeleton: { borderRadius: 26, backgroundColor: '#fff', ...CARD_SHADOW },
 });

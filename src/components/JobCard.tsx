@@ -9,6 +9,7 @@
 
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { openJobActions } from './JobActions';
 import { useRouter } from 'expo-router';
 import { CalendarDays, ChevronRight, Images, MapPin, Route, User } from 'lucide-react-native';
 import { palette } from '../theme';
@@ -29,6 +30,9 @@ function JobCardImpl({ job, showSite = true }: { job: JobSummary; showSite?: boo
   return (
     <TouchableOpacity
       onPress={() => router.push(`/job/${job.schedule_id}`)}
+      // long-press → "Attach in chat / View details" (src/components/JobActions.tsx)
+      onLongPress={() => openJobActions(job)}
+      delayLongPress={300}
       style={local.card}
       accessibilityRole="button"
     >

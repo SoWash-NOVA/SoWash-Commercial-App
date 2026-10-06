@@ -92,6 +92,7 @@ import {
   X,
 } from 'lucide-react-native';
 import { palette } from '../../src/theme';
+import { keep, ttc } from '../../src/themeEngine';
 import { useAccent } from '../../src/theme-context';
 import { photoUrl, errorMessage } from '../../src/api/client';
 import { subscribeTeamSocket } from '../../src/teamChatSocket';
@@ -132,7 +133,7 @@ import ChatBackground from '../../src/components/ChatBackground';
 import FadeInRow from '../../src/components/FadeInRow';
 import PageHeader from '../../src/components/PageHeader';
 import { mix, shade } from '../../src/utils/color';
-import { BRAND_GREEN_MID, HEADER_STOPS } from '../../src/brand';
+import { BRAND_GREEN_MID, GREEN_STOPS } from '../../src/brand';
 import ChatHeaderBar from '../../src/components/ChatHeaderBar';
 
 // Neither inbox list has a delta/poll concept the way an open thread does
@@ -222,7 +223,7 @@ function ChatAvatar({
       )}
       {group ? (
         <View style={s.avatarBadge}>
-          <Users size={10} color="#0f172a" />
+          <Users size={10} color={ttc('#0f172a')} />
         </View>
       ) : null}
     </View>
@@ -574,6 +575,52 @@ export default function StaffChatsScreen() {
  * Inbox
  * ==================================================================== */
 
+/** Org-level admins (users."Type") — they also see assigned-and-open conversations in yellow. */
+function isAdminRole(role: string | null | undefined) {
+  const r = String(role || '').trim().toLowerCase();
+  return r === 'admin' || r === 'ci_admin';
+}
+
+/**
+ * The messages inside an "assigned" stretch of a support thread — from the system note
+ * "X assigned this conversation to Y" until the conversation is closed (or the assignment is
+ * removed). Those bubbles are drawn yellow so the assigned period stands out.
+ * Driven by the system notes PATCH /threads/:id writes (sowash-backend
+ * routes/commercialChatRoutes.js — keep these phrases in sync with it). If no assign/close
+ * note is among the loaded messages but the thread is open and assigned right now, the
+ * assignment predates the loaded page, so everything loaded counts as inside it.
+ */
+function assignedSpanIds(
+  messages: ChatMessage[],
+  thread: { status?: string | null; assigned_user_id?: number | null } | null | undefined,
+): Set<number> {
+  const ids = new Set<number>();
+  let inside = false;
+  let sawNote = false;
+  for (const m of messages) {
+    if (m.sender_kind === 'system') {
+      const b = (m.body || '').toLowerCase();
+      if (b.includes('assigned this conversation to')) {
+        inside = true;
+        sawNote = true;
+      } else if (b.includes('closed this conversation') || b.includes('removed the assignment')) {
+        inside = false;
+        sawNote = true;
+      }
+      continue;
+    }
+    if (inside) ids.add(m.id);
+  }
+  if (!sawNote && thread?.status === 'open' && thread.assigned_user_id != null) {
+    for (const m of messages) if (m.sender_kind !== 'system') ids.add(m.id);
+  }
+  return ids;
+}
+
+/** Yellow for a conversation assigned to me that I haven't closed yet. */
+const ASSIGNED_AMBER = '#F5B800';
+const ASSIGNED_TEXT = '#8A5A00';
+
 function ThreadList({
   section,
   onChangeSection,
@@ -668,11 +715,21 @@ function ThreadList({
             const item = entry.item;
             const name = item.client_name || 'Client';
             const unread = item.unread > 0;
+            // Assigned to ME and still open: the row stays yellow until I close the conversation
+            // (closing moves it to the Closed tab; reassigning it to someone else clears it too).
+            const assignedOpen = item.status === 'open' && item.assigned_user_id != null;
+            const assignedToMe = assignedOpen && item.assigned_user_id === user?.id;
+            // The assignee AND admins see the yellow (admins hand the work out and follow it up).
+            const mine = assignedOpen && (assignedToMe || isAdminRole(user?.role));
             return (
               <FadeInRow index={index}>
-                <TouchableOpacity style={[s.row, unread && s.rowUnread]} activeOpacity={0.85} onPress={() => onOpen(item)}>
-                  {unread ? <View style={[s.rowEdge, { backgroundColor: accent }]} /> : null}
-                  <ChatAvatar name={name} ring={unread ? accent : undefined} />
+                <TouchableOpacity
+                  style={[s.row, unread && s.rowUnread, mine && s.rowAssignedMine]}
+                  activeOpacity={0.85}
+                  onPress={() => onOpen(item)}
+                >
+                  {mine || unread ? <View style={[s.rowEdge, { backgroundColor: mine ? ASSIGNED_AMBER : accent }]} /> : null}
+                  <ChatAvatar name={name} ring={mine ? ASSIGNED_AMBER : unread ? accent : undefined} />
                   <View style={{ flex: 1 }}>
                     <View style={s.rowTop}>
                       <Text style={[s.rowName, unread && s.rowNameUnread]} numberOfLines={1}>
@@ -700,7 +757,14 @@ function ThreadList({
                         </Text>
                       </View>
                     ) : null}
-                    {item.assigned_name ? (
+                    {mine ? (
+                      <View style={s.assignedMinePill}>
+                        <UserPlus size={11} color={ASSIGNED_TEXT} />
+                        <Text style={s.assignedMineText} numberOfLines={1}>
+                          {assignedToMe ? 'Assigned to you · close when done' : `Assigned to ${item.assigned_name || 'a colleague'} · still open`}
+                        </Text>
+                      </View>
+                    ) : item.assigned_name ? (
                       <Text style={s.rowAssigned} numberOfLines={1}>
                         Assigned to {item.assigned_name}
                       </Text>
@@ -946,7 +1010,7 @@ function TeamList({
       {/* New chat — a big floating action button instead of a tiny header icon. */}
       <TouchableOpacity activeOpacity={0.9} onPress={() => setNewOpen(true)} style={s.fab}>
         <LinearGradient
-          colors={[BRAND_GREEN_MID, HEADER_STOPS.mid]}
+          colors={[BRAND_GREEN_MID, GREEN_STOPS.mid]}
           start={{ x: 0.2, y: 0 }}
           end={{ x: 0.9, y: 1 }}
           style={s.fabInner}
@@ -1195,6 +1259,9 @@ function ThreadView({
     },
     [photoMedia],
   );
+
+  // ── the assigned stretch (yellow bubbles) ──
+  const assignedIds = useMemo(() => assignedSpanIds(messages, meta), [messages, meta]);
 
   // ── reactions ──
   const [actionTarget, setActionTarget] = useState<{ message: ChatMessage; rect: ActionRect } | null>(null);
@@ -1479,6 +1546,7 @@ function ThreadView({
               message={item}
               accent={accent}
               myUserId={user?.id}
+              assigned={assignedIds.has(item.id)}
               reactions={reactionsByMessage.get(item.id)}
               searchQuery={searchOpen ? searchQuery : undefined}
               onOpenPhoto={openPhoto}
@@ -1856,12 +1924,13 @@ function MessageBody({
 }
 
 /** The soft light-to-deep sheen on my own bubbles (sits under the content; the bubble's own colour shows at the corners). */
-function BubbleGradient({ accent, brand }: { accent: string; brand?: boolean }) {
+function BubbleGradient({ accent, brand, amber }: { accent: string; brand?: boolean; amber?: boolean }) {
   return (
     <LinearGradient
       pointerEvents="none"
       // `brand` = the logo's sky blue (deep enough for white text) — used for my own bubbles in Team (internal) chat.
-      colors={brand ? ['#0E78B5', '#2AA9E3'] : [shade(accent, 0.12), shade(accent, -0.14)]}
+      // `amber` = my message inside an assigned stretch (see assignedSpanIds) — deep enough for white text.
+      colors={amber ? ['#E9A500', '#C27C00'] : brand ? ['#0E78B5', '#2AA9E3'] : [shade(accent, 0.12), shade(accent, -0.14)]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={s.bubbleGradient}
@@ -1905,6 +1974,7 @@ const Bubble = React.memo(function Bubble({
   message,
   accent,
   myUserId,
+  assigned,
   reactions,
   searchQuery,
   onOpenPhoto,
@@ -1916,6 +1986,8 @@ const Bubble = React.memo(function Bubble({
   accent: string;
   /** The VIEWING agent's own id — see the sender_user_id comment on ChatMessage. */
   myUserId: number | undefined;
+  /** Inside an assigned stretch (assign → close): drawn yellow. */
+  assigned?: boolean;
   reactions?: TeamReaction[];
   searchQuery?: string;
   onOpenPhoto: (messageId: number) => void;
@@ -1957,11 +2029,12 @@ const Bubble = React.memo(function Bubble({
           delayLongPress={300}
           style={[
             s.bubble,
-            mine ? { backgroundColor: accent, borderBottomRightRadius: 6 } : [s.bubbleTheirs, { borderBottomLeftRadius: 6 }],
+            mine ? { backgroundColor: assigned ? '#D99400' : accent, borderBottomRightRadius: 6 } : [s.bubbleTheirs, { borderBottomLeftRadius: 6 }],
+            !mine && assigned ? s.bubbleAssigned : null,
             hasReactions ? { marginBottom: 14 } : null,
           ]}
         >
-          {mine ? <BubbleGradient accent={accent} /> : null}
+          {mine ? <BubbleGradient accent={accent} amber={assigned} /> : null}
           {!mine && message.sender_name ? <Text style={s.sender}>{message.sender_name}</Text> : null}
 
           {message.site_name ? (
@@ -3778,6 +3851,20 @@ const s = StyleSheet.create({
   mentionPillText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   rowPreview: { flex: 1, fontSize: 12.5, fontWeight: '600', color: palette.muted },
   rowAssigned: { fontSize: 10.5, fontWeight: '600', color: palette.mutedLight, marginTop: 3 },
+  // assigned to me + open (the dark theme maps the light yellow to a dark amber automatically)
+  rowAssignedMine: { backgroundColor: '#FFF6D6', borderWidth: 1.5, borderColor: '#F5C84A' },
+  assignedMinePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    backgroundColor: keep('#FDE68A'), // stays yellow-on-dark-text in both themes
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginTop: 5,
+  },
+  assignedMineText: { fontSize: 11, fontWeight: '800', color: keep(ASSIGNED_TEXT) },
   unreadBadge: { minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
   unreadBadgeText: { color: '#fff', fontSize: 10.5, fontWeight: '900' },
 
@@ -3961,6 +4048,8 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     elevation: 1,
   },
+  // a colleague's / the client's message inside an assigned stretch (dark theme maps it to a dark amber)
+  bubbleAssigned: { backgroundColor: '#FFF3C4', borderWidth: 1.5, borderColor: '#F5C84A' },
   bubbleTheirs: {
     backgroundColor: '#fff',
     shadowColor: '#0f172a',
@@ -3972,7 +4061,7 @@ const s = StyleSheet.create({
   sender: { fontSize: 11, fontWeight: '800', marginBottom: 3, color: palette.muted },
   text: { fontSize: 14.5, lineHeight: 21 },
   mentionHighlight: { fontWeight: '800' },
-  searchHighlight: { backgroundColor: '#ffd54f', color: '#1a1a1a', borderRadius: 3, fontWeight: '800' },
+  searchHighlight: { backgroundColor: '#ffd54f', color: keep('#1a1a1a'), borderRadius: 3, fontWeight: '800' },
   typingPillRow: { paddingHorizontal: 16, paddingBottom: 6 },
   typingPill: {
     alignSelf: 'flex-start',

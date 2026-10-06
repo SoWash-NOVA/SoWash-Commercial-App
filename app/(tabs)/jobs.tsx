@@ -67,6 +67,7 @@ import {
 import { useRouter, useLocalSearchParams, useNavigation } from 'expo-router';
 import { ArrowRight, CheckCircle2, CircleAlert, Filter, Inbox, Search, X } from 'lucide-react-native';
 import { palette } from '../../src/theme';
+import { tc, soft } from '../../src/themeEngine';
 import { useAccent } from '../../src/theme-context';
 import { useSiteContext } from '../../src/site-context';
 import { useJobs, formatDateOnly } from '../../src/hooks';
@@ -175,8 +176,8 @@ export default function JobsScreen() {
   return (
     <View style={s.screen}>
       <View pointerEvents="none" style={s.wash}>
-        <View style={[s.blob, { backgroundColor: '#dbeafe', top: -90, left: -70, width: 260, height: 260 }]} />
-        <View style={[s.blob, { backgroundColor: '#fce7f3', top: 240, right: -100, width: 260, height: 260 }]} />
+        <View style={[s.blob, { backgroundColor: soft('#dbeafe'), top: -90, left: -70, width: 260, height: 260 }]} />
+        <View style={[s.blob, { backgroundColor: soft('#fce7f3'), top: 240, right: -100, width: 260, height: 260 }]} />
       </View>
 
       <PageHeader title="Visits">

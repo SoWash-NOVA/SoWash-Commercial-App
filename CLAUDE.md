@@ -167,6 +167,16 @@ default `#0F766E`.
 
 ## 6. Non-obvious things worth knowing before touching this code
 
+- **Light/dark theme works by PATCHING `StyleSheet.create` (src/themeEngine.ts).** The app entry is now `/index.js` (package.json
+  `main`), which imports `src/themeEngine` BEFORE `expo-router/entry`. Every stylesheet created after that returns a Proxy that
+  serves a lazily-built dark twin when the mode is dark (light backgrounds/borders darkened, dark text lightened, per style
+  PROPERTY; mid tones untouched). Rules for new code: (1) never copy a `palette.*` value into a module-level constant used at render
+  — read `palette` at render (it is swapped live by `applyPalette`); (2) a colour written INLINE in JSX (not in a stylesheet)
+  must go through `tc()` (background/border/gradient stop) or `ttc()` (text/icon); (3) something that must stay as-is in both
+  themes (white on the coloured headers, dark text on yellow) uses `keep('#fff')`; decorative light blobs use `soft()`
+  (dropped in dark); (4) themeEngine.ts must not import anything that calls StyleSheet.create. The switch remounts everything
+  below AuthProvider (src/theme-mode.tsx) and navigates back to where it was made.
+
 - **No Reanimated despite it being installed.** `react-native-reanimated` v4 is in
   `package.json` but imported nowhere — this project has no `babel.config.js`, and v4 worklets
   need `react-native-worklets/plugin` registered there. `SldWalkthrough.tsx` uses the built-in
@@ -365,6 +375,121 @@ Sibling repos checked out under `D:\github\nova\`:
 Newest first. Each entry: what changed, in which file(s)/repo, and deploy status (this
 backend's deploys are **manual** — WinSCP sync + `pm2 restart` on the VPS, nothing here
 auto-deploys, so "fixed" below means "fixed in this working tree," not "live").
+
+### 2026-10-05 (hold a visit → attach in chat) — Client: long-press any visit for a WhatsApp-style pop-up; "Attach in chat" links it to a message
+
+Long-press (300ms) a visit — Visits list (`JobCard`), Overview's next-visit hero and "Coming up" rows — opens
+`src/components/JobActions.tsx` (one `<JobActionsHost/>` in `app/(tabs)/_layout.tsx`, opened with `openJobActions(job)`): the screen dims,
+the visit is shown lifted as a card (site, status, date, service #, address, team lead) with a menu under it — **Attach in chat**
+and **View details**. Attach hands the visit to the Support tab through `src/chat-attach.ts` (one-shot store + sequence counter,
+because the tab stays mounted), which opens General with that visit already tagged and the keyboard up; the composer shows a
+WhatsApp-reply-style "Linked visit" card (removable with ×) and the placeholder "Write about this visit…". Sending uses the
+existing visit-tag path (`schedule_id` on POST /customer-portal/chat/messages), so the message carries the visit card for staff
+exactly like a tag picked from the calendar button. No backend change. No haptic on long-press (`expo-haptics` isn't installed and
+would need a native build). Rendered in both themes incl. the full hold → popup → attach → chat flow; not seen on a device.
+
+### 2026-10-05 (assigned = yellow) — A support conversation assigned to you stays yellow in the Chats list until you close it
+
+`ThreadList` in `app/staff/chats.tsx`: when a thread is `status === 'open'` and `assigned_user_id` is the signed-in staff user, its row gets a
+yellow card (`rowAssignedMine`), an amber edge bar + avatar ring, and an "Assigned to you · close when done" pill instead of
+"Assigned to <name>". Closing moves it to the Closed tab (so the yellow goes); reassigning it to someone else clears it for you.
+Shown to the ASSIGNEE and to org admins (`users."Type"` admin / ci_admin, `isAdminRole`) — admins see "Assigned to X · still open"; everyone else
+still sees the plain "Assigned to X" line. **Inside the thread** (staff `ThreadView`), every non-system message between the system note
+"X assigned this conversation to Y" and the next "… closed this conversation" / "… removed the assignment" note is drawn yellow
+(`assignedSpanIds` + `Bubble assigned`: theirs = light-yellow card with amber border, mine = amber gradient). This matches the
+wording the backend PATCH /threads/:id writes — a string coupling, commented at the function. If the loaded page has no such note
+but the thread is open + assigned now, all loaded messages count as inside. A conversation closed BEFORE the close note existed
+has no end marker, so its stretch runs to the last message. The client app is unchanged. App-only, uses fields the list already
+had (no backend change). Rendered in both themes (the pill uses `keep()` so it stays yellow with dark text in dark). Not seen on a device.
+
+### 2026-10-05 (dark theme) — Light / Dark theme, chosen in Account → Appearance (verified by rendering every page, NOT yet seen on a device)
+
+- **How:** see §6's first bullet. New files: `index.js` (entry), `src/themeEngine.ts` (StyleSheet patch, colour maths,
+  `tc/ttc/keep/soft`, the dark palette), `src/theme-mode.tsx` (`ThemeModeProvider`: loads the stored choice — SecureStore key
+  `appThemeMode` — before the first frame, applies it, `setMode(mode, returnTo)` persists + remounts; `ThemeRemount`),
+  `src/components/AppearanceCard.tsx` (Light/Dark tiles with mini previews; on the client AND staff Account screens).
+  `src/theme.ts`'s `palette` is now live (`applyPalette`). `app/_layout.tsx`: providers re-ordered (ThemeModeProvider →
+  accent → Auth → ThemeRemount → NavTheme (React Navigation Dark/Default theme with our bg) → …), the default status bar follows
+  the mode (and `ChatHeaderBar` restores to it), and `RootNavigator` returns to the Account screen after a switch.
+  Inline fixes: Overview tiles/date chips/weather, ring status pills, support avatar, team-avatar badge icon, photo tile
+  placeholder, blobs (`soft`), search highlight + staff hero white pill/bar (`keep`). Tab-bar icons sit in a `zIndex:1` layer
+  above the gradient fill (the web render painted the fill over them).
+- **Verified:** typecheck clean; `expo export --platform android` bundles; every page rendered at 390px in BOTH themes with a mock
+  API — login; client Overview (top + bottom), site picker, Visits (completed/upcoming), visit detail (top + bottom), Sites,
+  Support list, General chat, ring history, Account (top + bottom), Notifications, Maintenance list + task, Documentation + TBT /
+  Safety / Site SLD, Privacy; staff Overview (top + bottom), Jobs → client visits → job sheet popup, Clients, Chats (Support list,
+  Support thread, Team list, Team thread), Account — no JS errors; and the in-app switch (light→dark→light) stays on /profile and
+  persists. **Not covered:** a real device (native shadows/elevation, status bar icons, the remount on a phone), the SLD
+  walkthrough (already dark by design), photo viewer, group info / people picker, keyboard states. The harness lived in the
+  session scratchpad only; the temporary `metro.config.js`/`app.config.js` it needed were removed.
+- **Needs a new native build?** No — JS only (the `main` entry change is picked up by Metro). Reload with `r`.
+
+### 2026-10-05 — Login redesigned from a reference image (wave shapes + illustration); gesture-handler version mismatch found (written, NOT yet seen on a device)
+
+- **Login (`app/login.tsx`)**, from a "Getting Started" reference the user shared, recoloured to the brand green (leading) + sky blue:
+  white page, SVG wave shapes top (green top-left, blue down the right) and in the bottom corners, an SVG illustration in the hero
+  (GENERAL on purpose — the user asked for no solar imagery: a laptop showing the desktop dashboard with a phone in front showing the mobile app, a green chat bubble, a check badge, sparkles; slow native-driven float), logo + "SoWash Commercial App", a white card
+  with underline inputs (label left; email shows a green check when valid, password has a "Show/Hide" link on the right; the focus
+  underline is an absolute gradient layer so focus never changes layout), a blue pill gradient "Sign in" button with the arrow on
+  the right, and "Powered By iNOVAA.AI" at the bottom. The reference's second button ("Create an Account") was deliberately left
+  out — there is no sign-up, and no support address exists to point a help button at. The draggable physics bubbles and doodles are
+  gone from the login, so `src/components/BubblePhysics.tsx` is now imported nowhere (left in place). Auth logic and the keyboard
+  rule are unchanged. Typecheck clean.
+- **Login fit + keyboard (same day, user: "a slight scroll even with no keyboard; the email/password section should come up above
+  the keyboard on its own"):** the hero height is now computed so hero + form + footer = exactly the scroll view's height (body,
+  footer and viewport measured with `onLayout` while the keyboard is CLOSED; the viewport value only ever grows), and scrolling
+  is disabled (`bounces`/`overScrollMode` off) while it fits. `KeyboardAvoidingView` was removed: on `keyboardDidShow` the
+  root is measured in the window, the overlap with the keyboard is appended as an empty spacer at the END of the content, and
+  the page scrolls so the whole card (fields + Sign in) sits just above the keys (its top edge if the card is taller than the
+  space). Works whether Android overlaps (edge-to-edge) or resizes the window. An error box appearing while the keyboard is open
+  doesn't re-size the hero until the keyboard closes. NOT seen on a device.
+- **Page headers are now blue + green (user: "the green top header — make it SoWash blue and green, and better if possible"):**
+  `HEADER_STOPS` (`src/brand.ts`) is a deep-ocean → sky BLUE gradient (`#07324F → #0B5F92 → #1283C4`); `ChatHeaderBar` adds a
+  sky-blue glow top-right (`ORB_A`, shared with the status strip so the seam stays invisible), a lime glow bottom-left, and — on
+  ROUNDED headers only (every `PageHeader`, the chat list headers) — two layered GREEN SVG waves along the bottom edge, the same
+  wave language as the login; rounded headers get `WAVE_H - 6` extra bottom padding so content clears the wave. Flat chat-thread
+  headers get the blue + glows but no wave. The chat buttons that used `HEADER_STOPS` (both tab bars' centre button, the client
+  ring button, the Team FAB) now read the new `GREEN_STOPS`, so they stay green. NOT seen on a device.
+- **Second pass (user: "the colour isn't SoWash's — it should be like the logo — and the design isn't good"):** the navy was
+  dropped. Headers are now the LOGO's own sky blue (`#33B8F0` at the top / status strip → `#1A9BE0` at the bottom), a soft white
+  sheen top-right (`ORB_A`), a lime glow bottom-left, and on rounded headers a translucent white wave behind a LOGO-LIME
+  (`#7EF505`) wave along the bottom — blue over green like the logo's square mark. `PageHeader` titles/subtitles carry a soft
+  dark text shadow because white on `#33B8F0` is only ~2.3:1. `GREEN_STOPS` (chat buttons) moved closer to the logo lime
+  (`#4CB800 → #6EDB00`). If it still doesn't read well, the alternative is a WHITE header with the logo colours as shapes and
+  dark text (like the login) — a bigger change, every header's children are styled white.
+- **Third pass (user: "use a gradient, make it aesthetic"):** `HEADER_STOPS` is replaced by `HEADER_GRADIENT` — a HORIZONTAL
+  sweep of the logo's colours, `#1C9BE0 → #33B8F0 → #4CC9A0 (aqua-mint) → #6BD81A` (left, where titles sit, is the deepest blue;
+  the right stops short of pure lime so white icons still show). Because it is horizontal, `TopInsetFill` now just draws the same
+  gradient (the old vertical `barColorAt`/`headerStops`/`MID_STOP` slicing is gone; `BarSpec` is `{colors, locations,
+  headerHeight}`). Inside the header: a darkening layer toward the bottom (transparent at the top edge so the seam stays
+  invisible), a white sheen orb top-right (in both header and strip), and on rounded headers two frosted WHITE waves instead
+  of the lime one.
+- **Client Overview redesigned (`app/(tabs)/index.tsx`, user: "make it more appealing/attractive"):** brand colours only (logo blue
+  `#1C9BE0/#33B8F0`, logo green, a teal between them, one amber), fixed — no longer the user accent. Sections, each with a blue→lime
+  title bar and cascading in via `FadeInRow`: a full-width gradient **Next visit** hero (glass pills for relative day / service
+  number, a white date tile, site + city, team lead, "All visits" link), a new **Coming up** list (the 2nd–4th of the 5 upcoming
+  visits already fetched — no new request), a horizontal **weather** strip, a **Visits completed X of Y** gradient progress bar
+  (completed/total from `/stats`) over four gradient-icon count tiles, two **Quick access** cards (Maintenance, Documentation) and
+  the restyled robot card. Data hooks, weather logic and the KPI links are unchanged.
+- **Staff Overview redesigned to match (`app/staff/index.tsx`):** a blue→aqua gradient summary hero holding the period pills (glass,
+  white when active), the period total and a white completion bar (completed/total); four gradient-icon tiles (Scheduled blue, In
+  progress amber, Completed green, Rescheduled coral — not tappable, as before); Quick access cards for Jobs / Clients / Chats; and
+  Recent activity as one card with date tiles and status pills. Same data hooks; no extra polling (the chat unread counts stay on
+  the tab bar only).
+- **Both Overviews calmed down (user: "too multicolour — make it decent, simple and attractive"):** one brand blue + neutrals. The heroes
+  are a single-hue blue gradient (`#1689CC → #2EAEE8`) with white rings, no lime glow; every icon chip (tiles, quick access,
+  weather, robot) is a soft blue chip with a blue icon instead of per-metric gradients; no tinted corner circles or background
+  blobs; date tiles flat light blue with the month in grey; section bars, progress bar and percentage in blue. Colour is left only
+  where it MEANS something: status pills (statusMeta) and the robot's green "Cleaning" state.
+- **Quick access removed from both Overviews** (user request; on the client side Maintenance and Documentation are still reached
+  from the Account tab). **Both tab bars** (`src/components/FloatingTabBar.tsx` staff, `app/(tabs)/_layout.tsx` client): the SELECTED
+  item is now a circle filled with `HEADER_GRADIENT` behind a white icon (with a soft blue shadow), its label in `#1C9BE0`; the raised
+  centre Chats/Support button uses the same gradient instead of green. `GREEN_STOPS` is now used only by the client ring button and
+  the Team FAB.
+- **Red screen "undefined is not a function" at `RNGestureHandlerModule.install()`:** the last commit had
+  `react-native-gesture-handler ~3.1.0` (and RN 0.86.2) while the uncommitted working tree (after an `expo install --fix`) has the
+  SDK-57 version `~2.32.0` (and RN 0.86.3). EAS builds from the commit, so the APK carried 3.1's native code while Metro served
+  2.32's JS. Fix: commit `package.json` + `package-lock.json`, then rebuild.
 
 ### 2026-10-03 — SESSION SNAPSHOT: everything done in the 2026-10-01 → 10-03 push, and what is still open (read first)
 

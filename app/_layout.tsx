@@ -5,7 +5,7 @@
 
 import React, { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider as NavThemeProvider, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -14,6 +14,7 @@ import { AuthProvider, useAuth } from '../src/auth/AuthContext';
 import { TopInsetFill, TopInsetProvider } from '../src/top-inset-color';
 import { initPush } from '../src/push';
 import { palette, ACCENT_DEFAULT } from '../src/theme';
+import { ThemeModeProvider, ThemeRemount, useThemeMode } from '../src/theme-mode';
 
 /**
  * Routes a signed-out user may sit on. Everything else requires a session.
@@ -44,6 +45,17 @@ function RootNavigator() {
   const { status, appRole } = useAuth();
   const segments = useSegments();
   const router = useRouter();
+  const { takeReturnTo } = useThemeMode();
+
+  // A light/dark switch remounts this navigator (src/theme-mode.tsx), which lands on the
+  // first screen again; go back to where the switch was made (the Account screen).
+  useEffect(() => {
+    if (status !== 'signedIn') return;
+    const back = takeReturnTo();
+    if (back) setTimeout(() => router.replace(back as never), 0);
+    // once per mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
 
   useEffect(() => {
     // Wait for the stored session to be restored before redirecting anywhere,
@@ -137,6 +149,23 @@ function RootNavigator() {
   );
 }
 
+/** React Navigation's own theme (scene backgrounds, transitions) — follows the light/dark choice. */
+function NavTheme({ children }: { children: React.ReactNode }) {
+  const { mode } = useThemeMode();
+  const base = mode === 'dark' ? DarkTheme : DefaultTheme;
+  const theme = {
+    ...base,
+    colors: { ...base.colors, background: palette.bg, card: palette.surface, border: palette.border, text: palette.ink },
+  };
+  return <NavThemeProvider value={theme}>{children}</NavThemeProvider>;
+}
+
+/** The default status-bar icon colour: dark icons on the light theme, light on the dark one. */
+function ThemedStatusBar() {
+  const { mode } = useThemeMode();
+  return <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />;
+}
+
 /**
  * The app-wide safe-area shell. Every route gets top/bottom insets as padding —
  * EXCEPT the login screen, which paints its own backdrop edge to edge (gradient,
@@ -160,18 +189,26 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <ThemeProvider>
-          <AuthProvider>
-            <TopInsetProvider>
-              <Shell>
-                <StatusBar style="dark" />
-                <RootNavigator />
-                {/* After the navigator so it paints over the (empty) status-bar inset; a chat header colours it. */}
-                <TopInsetFill />
-              </Shell>
-            </TopInsetProvider>
-          </AuthProvider>
-        </ThemeProvider>
+        {/* Light/dark: loads the stored choice before the first frame; ThemeRemount remounts
+            everything below AuthProvider when it changes (src/theme-mode.tsx). */}
+        <ThemeModeProvider>
+          <ThemeProvider>
+            <AuthProvider>
+              <ThemeRemount>
+                <NavTheme>
+                  <TopInsetProvider>
+                    <Shell>
+                      <ThemedStatusBar />
+                      <RootNavigator />
+                      {/* After the navigator so it paints over the (empty) status-bar inset; a chat header colours it. */}
+                      <TopInsetFill />
+                    </Shell>
+                  </TopInsetProvider>
+                </NavTheme>
+              </ThemeRemount>
+            </AuthProvider>
+          </ThemeProvider>
+        </ThemeModeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
