@@ -9,7 +9,7 @@
 // deletes chat videos 30 days after upload anyway.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Platform, Pressable, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import { RefreshCw, X } from 'lucide-react-native';
 import { ChatPhotoInput } from './hooks';
@@ -95,7 +95,13 @@ function CameraModal({ onClose, onCaptured }: { onClose: () => void; onCaptured:
     if (!micPerm?.granted) {
       const r = await requestMic();
       if (!r.granted) {
-        Alert.alert('Microphone needed', 'Allow microphone access in Settings to record video with sound.');
+        Alert.alert(
+          'Microphone needed',
+          'Allow microphone access for SoWash in Settings to record video with sound.',
+          r.canAskAgain
+            ? [{ text: 'OK' }]
+            : [{ text: 'Cancel', style: 'cancel' }, { text: 'Open Settings', onPress: () => Linking.openSettings() }],
+        );
         return;
       }
     }
@@ -141,7 +147,12 @@ function CameraModal({ onClose, onCaptured }: { onClose: () => void; onCaptured:
         ) : (
           <View style={st.center}>
             {denied ? (
-              <Text style={st.msg}>Camera access is turned off. Enable it in Settings to take photos and videos.</Text>
+              <>
+                <Text style={st.msg}>Camera access is turned off. Enable it in Settings to take photos and videos.</Text>
+                <TouchableOpacity onPress={() => Linking.openSettings()} style={st.settingsBtn}>
+                  <Text style={st.settingsBtnText}>Open Settings</Text>
+                </TouchableOpacity>
+              </>
             ) : (
               <ActivityIndicator color="#fff" />
             )}
@@ -198,6 +209,8 @@ function CameraModal({ onClose, onCaptured }: { onClose: () => void; onCaptured:
 const st = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  settingsBtn: { marginTop: 16, backgroundColor: '#fff', borderRadius: 20, paddingHorizontal: 20, paddingVertical: 10 },
+  settingsBtnText: { color: '#0f172a', fontWeight: '700' },
   msg: { color: '#fff', textAlign: 'center', fontSize: 15, lineHeight: 22 },
   close: {
     position: 'absolute',

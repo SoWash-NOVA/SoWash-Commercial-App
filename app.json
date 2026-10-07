@@ -55,7 +55,7 @@
         "expo-image-picker",
         {
           "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera to take a photo.",
-          "microphonePermission": false
+          "microphonePermission": "Allow $(PRODUCT_NAME) to use your microphone to send voice messages and record video."
         }
       ],
       [

@@ -7,7 +7,7 @@
 // composer needs to swap its text pill for <VoiceRecordingBar/> while recording.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, PanResponder, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, PanResponder, StyleSheet, Text, View } from 'react-native';
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
 import { ChevronLeft } from 'lucide-react-native';
 import { ChatPhotoInput } from './hooks';
@@ -69,7 +69,15 @@ export function useVoiceHold(onRecorded: (file: ChatPhotoInput) => void) {
     try {
       const perm = await requestRecordingPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert('Microphone needed', 'Allow microphone access in Settings to send voice messages.');
+        // Android stops showing the system prompt after two denials ("don't ask again"), so
+        // the only way back is the app's Settings page.
+        Alert.alert(
+          'Microphone needed',
+          'Allow microphone access for SoWash in Settings to send voice messages.',
+          perm.canAskAgain
+            ? [{ text: 'OK' }]
+            : [{ text: 'Cancel', style: 'cancel' }, { text: 'Open Settings', onPress: () => Linking.openSettings() }],
+        );
         return;
       }
       if (!holdingRef.current) return; // the permission prompt ate the press
