@@ -3,6 +3,8 @@
 This file is a full map of this repository and the backend it talks to, built by reading every
 source file in both. It exists because neither repo had project documentation when this was
 written (2026-09-17). Keep it updated as the code changes — it will go stale otherwise.
+**Last full update: 2026-10-07** — §1–§5 and §7/§9 were refreshed then; start with the 2026-10-07
+session snapshot at the top of §10 for what is live, what is pending, and what is uncommitted.
 
 ---
 
@@ -10,9 +12,13 @@ written (2026-09-17). Keep it updated as the code changes — it will go stale o
 
 **SoWash Commercial** is an Expo / React Native mobile app for the site managers of SoWash's
 commercial and industrial (C&I) solar-cleaning clients. It is the **B2B sibling** of the
-residential `sowash-customer-app` — same design language, different accent color (teal
-`#0F766E` vs. residential's `#2E6BFF`), different density (tables over hero cards), and a
-structurally different data model: a commercial client has **many sites**, not one address.
+residential `sowash-customer-app` — same component language, different density (tables over hero
+cards), and a structurally different data model: a commercial client has **many sites**, not one
+address. Since 2026-10-03/05 the look is the **SoWash logo's own colours** (sky blue `#33B8F0` +
+lime `#7EF505`; headers, tab bar, login, Overview) rather than the old teal accent, and there is a
+user-selectable **Light / Dark theme** (Account → Appearance) — see §5 and §6.
+- **Two identities in one app:** client site managers (`app/(tabs)/*`) and SoWash office staff
+  (`app/staff/*`, roles ci_admin / operations / admin / sales / accounts) sign in on the same login screen.
 
 - Stack: Expo SDK ~57, `expo-router` (file-based routing), React 19, React Native 0.86,
   TypeScript (strict), `react-native-reanimated` 4 (installed but **not used** — see §6),
@@ -29,17 +35,17 @@ structurally different data model: a commercial client has **many sites**, not o
 app/                          expo-router file-based routes
   _layout.tsx                 root layout: providers, auth-gate redirect, push init
   (tabs)/_layout.tsx          5-tab shell: Overview, Visits, Sites, Support, Account
-  (tabs)/index.tsx            Overview — next visit, KPIs, recent visits
+  (tabs)/index.tsx            Overview — next-visit hero, coming up, site weather, completion bar + counts, robot
   (tabs)/jobs.tsx             Visits — full history list, scope tabs, search
   (tabs)/sites.tsx            Sites — the client's estate, tap to filter + jump to Visits
-  (tabs)/support.tsx          Support — one chat thread per account
-  (tabs)/profile.tsx          Account — identity, contract info, privacy, sign out
+  (tabs)/support.tsx          Support — site list → per-site ring history, General = the one chat thread per account
+  (tabs)/profile.tsx          Account — identity, contract info, Appearance (light/dark), accent, links, sign out
   job/[id].tsx                One visit's full detail (route wrapper around JobDetailBody)
   maintenance/index.tsx       Maintenance task list (contract-level, not site-level)
   maintenance/[id].tsx        One maintenance task detail
   walkthrough/[id].tsx        Full-screen SLD (single-line diagram) walkthrough viewer
   notifications.tsx           The bell — notification feed
-  login.tsx                   Email + password sign-in
+  login.tsx                   Email + password sign-in (brand waves + laptop/phone SVG illustration; fits one screen)
   privacy.tsx                 In-app privacy policy (must mirror docs/privacy-policy.html)
 
 src/
@@ -63,14 +69,21 @@ app/staff/                    OFFICE/STAFF mode (a second identity — see 2026-
                                  (Support + Team), Clients, Account
 app/documentation/            Documentation menu: Site SLD, TBT, Safety Training
 
+index.js                       APP ENTRY (package.json "main") — imports src/themeEngine FIRST, then expo-router/entry
+
 src/ (additions since the first map — see the 2026-10-0x changelog entries)
-  brand.ts                     logo colours + HEADER_STOPS (green-led header gradient)
+  brand.ts                     logo colours; HEADER_GRADIENT (horizontal blue→aqua→lime, headers + tab bar);
+                               GREEN_STOPS (client ring button, Team FAB)
+  themeEngine.ts               light/dark: patches StyleSheet.create (dark twin per stylesheet), tc/ttc/keep/soft, DARK palette
+  theme-mode.tsx               ThemeModeProvider (stored choice, SecureStore "appThemeMode"), useThemeMode, ThemeRemount
+  chat-attach.ts               one-shot hand-off "attach this visit in chat" → Support tab opens General with it tagged
   dataCache.ts                 in-memory stale-while-revalidate cache behind useAsync (cleared on auth change)
   chat-focus.ts                "a chat is open": hides the tab bars + Android back closes the chat
   useChatScroll.ts             opens chats at the newest message; scroll-up paging for older ones
   top-inset-color.tsx          status-bar strip that matches the page header
   teamChatSocket.ts, staff-context.tsx, photoPicker.ts
-  components/                  ChatHeaderBar, PageHeader, ChatBackground, FadeInRow, BubblePhysics (login),
+  components/                  ChatHeaderBar, PageHeader, ChatBackground, FadeInRow, BubblePhysics (now unused),
+                               AppearanceCard (Light/Dark picker), JobActions (long-press visit pop-up + host),
                                FloatingTabBar, PhotoStripList (lazy photo rows/tiles), KeyboardScreen
                                (keeps the composer above the keyboard), ComingSoon
 
@@ -79,6 +92,8 @@ plugins/withFcmNotification.js  Expo config plugin: FCM tray icon/color, works a
                                  @react-native-firebase/messaging
 docs/privacy-policy.html        hosted privacy policy (Play Console links here) — keep in
                                  sync with app/privacy.tsx by hand
+docs/backend-patches/           backend changes this app needs, written as patches to apply to the LIVE
+                                 backend files (see §7 "Where the backend code is") — 3 pending as of 10-07
 ```
 
 ---
@@ -109,6 +124,9 @@ overwriting fresh ones), talking to `src/api/client.ts`'s axios instance.
   it shifts a day. Timestamp columns (`started_at`, `completed_at`, chat `created_at`, …) DO
   carry a real instant and are rendered in `Asia/Karachi` (PKT) per the workspace-wide
   convention — see `formatDateTime`/`formatTime` in `src/hooks.ts`.
+- **Theme**: the Light/Dark choice is loaded from SecureStore (`appThemeMode`) before the first frame
+  and applied to every stylesheet + the live `palette` (§6). Switching remounts everything below
+  AuthProvider; the in-memory data cache makes the screens repaint instantly.
 - **Money/size fields** (`total_system_size`, `sales_price_before_tax`, etc.) are `VARCHAR` in
   the schema, not numeric — they arrive as strings like `"1,250,000"` or `"300 kW"` and must be
   parsed, not summed, on the client.
@@ -134,12 +152,19 @@ and `sowash-backend/routes/portalAuthRoutes.js` (login).
 | `GET /customer/profile` | the `commercial_clients` row (contract, contact, sizes) |
 | `GET /stats` | KPI counts — **client-wide, not site-filtered** (no `site_id` param) |
 | `GET /history` | visit list — `scope=past\|upcoming\|all`, `site_id`, `search`, `limit`/`offset` |
-| `GET /:schedule_id/detail` | one visit + its FSR (field service report); only returns approved visits, or one scheduled today |
-| `GET /client/sites` | every site under this client |
+| `GET /:schedule_id/detail` | one visit + its FSR (field service report); only returns approved visits, or one scheduled today. **No `attendance` / `total_panels_cleaned` yet** (patch pending) |
+| `GET /documentation/tbt`, `/documentation/safety-training` | TBT photos per completed visit (also feeds the visit report's TBT strip); safety-training photos |
+| `GET /client/sites` | every site under this client — **does not send `latitude`/`longitude` yet** (weather card says "No location on file"; patch pending) |
 | `GET /maintenance-history`, `/maintenance-stats`, `/maintenance/:id/detail` | contract-level maintenance tasks — **no site column exists**, so these never take a `site_id` |
 | `GET /sld/:schedule_id` | the site's single-line diagram + pins + this visit's before/after photos per pin |
 | `GET/POST /notifications*`, `/push/register` | bell feed, unread count, mark-read, FCM registration |
-| `GET/POST /chat*` | the one support thread for this account (polled, not websocket) |
+| `GET/POST /chat*` | the one support thread for this account (polled, not websocket): `/chat`, `/chat/messages` (`limit`/`before_id` paging, `site_id`, `schedule_id` visit tag), `/chat/rings`, `/chat/typing`, `PUT /chat/messages/:mid/reaction`, `/chat/read`. **Reply-to (`reply_to_id`) not on the server yet** (patch + migration pending) |
+
+Staff mode (`app/staff/*`) uses the staff APIs instead — `/api/schedule/{history,stats,clients}`,
+`/api/commercial-chat/*` (client support inbox) and `/api/staff-chat/*` (Team DMs/groups + WebSocket) —
+all behind the staff `authenticate` gate, which **rejects a client (`kind:'portal'`) token with 403**. A
+client screen can therefore never reuse a staff endpoint (e.g. `/schedule/history`'s attendance); the data
+has to be added to a `/customer-portal/*` route, scoped to the caller's client.
 
 Two backend behaviors the app's UI is built around:
 - **Approval gating**: a completed visit is invisible to the customer (`/history`, `/stats`,
@@ -158,10 +183,20 @@ Two backend behaviors the app's UI is built around:
 ## 5. Design system
 
 `src/theme.ts` is shared in spirit with `sowash-customer-app`'s theme — same component
-language (cards, tabs, pills, spacing) — differing only in accent color and density. If a
-style change here isn't commercial-specific, the residential app probably wants it too.
-Accent is user-selectable (Account tab) and held in `ThemeProvider` (`src/theme-context.tsx`),
-default `#0F766E`.
+language (cards, tabs, pills, spacing). If a style change here isn't commercial-specific, the
+residential app probably wants it too.
+
+- **Brand colours (`src/brand.ts`)** — the logo's sky blue `#33B8F0` and lime `#7EF505` (+ darker
+  greens for text on white). They drive, fixed (not the user accent): every page/chat header
+  (`ChatHeaderBar`/`PageHeader`: horizontal `HEADER_GRADIENT` `#1C9BE0 → #33B8F0 → #4CC9A0 → #6BD81A`, white
+  sheen, frosted white waves on rounded headers; the status-bar strip draws the same gradient), both
+  tab bars (selected item = gradient circle + white icon, centre Chats/Support button = gradient,
+  labels `#1C9BE0`), the login, and both Overviews (one blue + neutrals, colour only where it means
+  something — status pills).
+- **User accent** (Account → App colour, `ThemeProvider` in `src/theme-context.tsx`, default teal
+  `#0F766E`) still tints pills, chat bubbles, the chat wallpaper and badges.
+- **Light / Dark** (Account → Appearance) — see §6's first bullet for how it works and the rules for
+  writing colours in new code.
 
 ---
 
@@ -220,6 +255,14 @@ fully isolated Postgres connection for a Mideast/NOVAA region:
 | `sowash-customer-app` (residential) | `/api/customer-app/*` | Firebase phone-OTP → 30-day JWT |
 | Staff/ops console (`sowash-frontend`) | `/api/{scheduling,ci-admin,attendance,userRoutes,...}` | 12h staff JWT, no `kind` claim |
 | Mideast region | `/api/mideast/*` | separate JWT, separate `md_users` table, **separate database connection** (`mideastClient`) — no query anywhere spans both databases |
+
+**Where the backend code is (2026-10-07):** earlier entries mention `D:\github\nova\sowash-backend` —
+that path no longer exists on this PC. The only checkout here is `C:\Users\Emaad\Desktop\sowash-backend`,
+and it is **stale**: its `routes/customerJobHistoryRoutes.js` is dated 21 Sep and lacks the whole
+October chat work (rings, typing, reactions, paging, site labels). **Never edit that copy and upload it**
+— it would remove live features. The VPS's files are the source of truth: download the live file
+(WinSCP), patch it, upload, `pm2 restart`. Changes this app needs are written up in
+`docs/backend-patches/` for exactly that workflow.
 
 Cross-cutting patterns worth knowing if you ever touch backend code:
 - **One emitter per notification domain.** `notifyScheduleEvent`/`notifyJobEvent`/
@@ -356,7 +399,8 @@ Notable constraints:
 
 ## 9. The wider SoWash ecosystem
 
-Sibling repos checked out under `D:\github\nova\`:
+Sibling repos (now under `C:\Users\Emaad\Desktop\`; the old `D:\github\nova\` location is gone — and see §7
+about the backend checkout being stale):
 - **`sowash-backend`** — covered above.
 - **`sowash-customer-app`** — the residential Expo app this repo's `theme.ts`/`hooks.ts`/
   `api/client.ts` are explicitly ported from (see in-file comments).
@@ -375,6 +419,67 @@ Sibling repos checked out under `D:\github\nova\`:
 Newest first. Each entry: what changed, in which file(s)/repo, and deploy status (this
 backend's deploys are **manual** — WinSCP sync + `pm2 restart` on the VPS, nothing here
 auto-deploys, so "fixed" below means "fixed in this working tree," not "live").
+
+### 2026-10-07 — SESSION SNAPSHOT: everything done 2026-10-05 → 10-07, and what is still open (read first)
+
+**Done in the app (typecheck clean; every screen rendered at 390px in light AND dark with a mock API + Chrome
+driver — NOT seen on a phone):** login redesign (brand waves + laptop/phone illustration, fits one screen, card lifts
+above the keyboard); headers + tab bars in the logo gradient; client and staff Overview redesigns (calm, one blue;
+Quick access removed); **Light/Dark theme** (Account → Appearance, every page); support chats assigned to me (and,
+for admins, any assigned-and-open one) shown **yellow** in the staff list, and the assigned stretch of messages
+(assign → close) yellow inside the thread; client **long-press a visit → "Attach in chat"** (opens General with the
+visit linked); client visit report shows the staff sheet's facts + **TBT** strip + **Attendance** card; **reply-to**
+(swipe / long-press) in the client Support chat AND the staff Support thread.
+
+**Pending on the BACKEND (nothing here works fully until applied to the LIVE files — see §7):**
+1. `docs/backend-patches/2026-10-07-client-sites-coordinates.md` — `latitude, longitude` in `GET /client/sites`
+   (weather card "No location on file").
+2. `docs/backend-patches/2026-10-07-client-visit-attendance.md` — `attendance` + `total_panels_cleaned` in
+   `GET /:schedule_id/detail`. Open decision inside: clients would also see crew clock-in selfies.
+3. `docs/backend-patches/2026-10-07-support-chat-replies.md` — **migration first** (`reply_to_id`), then both
+   message SELECTs and both send routes (`customerJobHistoryRoutes.js`, `commercialChatRoutes.js`).
+   All three touch `customerJobHistoryRoutes.js`; the user was asked to drop the live files on the Desktop so the
+   patches can be applied in one go. Also unconfirmed: whether the live PATCH /threads/:id writes the
+   "… closed this conversation" note the yellow stretch (and client ring "completed") rely on.
+
+**App state:** NOTHING since commit `dcea3ec` is committed — including `package.json`/`package-lock.json`
+(Expo SDK 57 alignment: react-native-gesture-handler 3.1 → 2.32, RN 0.86.3). The installed dev build was made from
+the old commit, so it shows a red screen ("undefined is not a function" at `RNGestureHandlerModule.install`) until
+these are committed and a new EAS build is installed. The entry changed to `index.js`, so restart Metro with
+`npx expo start -c --dev-client` (a plain `r` is not enough the first time). No new native module was added
+(`expo-haptics` deliberately not added).
+
+### 2026-10-07 (support replies) — Client Support chat: swipe / long-press → reply to a specific message (backend patch + migration, NOT deployed)
+
+Client `ChatThread` (`app/(tabs)/support.tsx`): swipe a message right (RNGH PanGestureHandler, same gesture as Team chat) or
+long-press → the new round Reply button at the end of the reaction pill → a "Replying to …" bar above the composer (×
+cancels, keyboard opens); the sent bubble shows the quote, and tapping a quote scrolls to the original (`jumpTo` +
+`onScrollToIndexFailed`). `useChat` sends `reply_to_id` and draws `reply_to` on the optimistic bubble; `ChatMessage` gained optional
+`reply_to_id`/`reply_to` (`TeamReplyRef` shape). The staff Support thread (`ThreadView`/`Bubble` in app/staff/chats.tsx) has the same reply UI since — swipe right, or long-press →
+Reply in `MessageActionsOverlay` — a "Replying to …" bar, tappable quotes, and `useStaffChatThread` sends `reply_to_id` (patch section 3b).
+**Backend:** `commercial_chat_messages` has no reply column — migration + both message SELECTs + the client send route are in
+`docs/backend-patches/2026-10-07-support-chat-replies.md` (apply to the LIVE files; migration first). Until then a reply sends as a
+normal message and its quote vanishes when the server copy replaces the optimistic bubble. Rendered both themes (reply bar + quote).
+
+### 2026-10-07 (weather) — "No location on file" although the site has coordinates: the sites endpoint never sent them (backend patch, NOT deployed)
+
+`GET /customer-portal/client/sites` selects no `latitude`/`longitude`, so `extractCoords` (Overview weather) never sees them. Fix is two
+columns in that SELECT — `docs/backend-patches/2026-10-07-client-sites-coordinates.md` (apply to the LIVE file, same reason as the
+attendance patch below). App side: `Site` type gained optional `latitude`/`longitude` (numeric → strings); `extractCoords` already handles them.
+
+### 2026-10-07 — Client visit report now shows what the staff Jobs sheet shows (attendance needs a backend patch — NOT deployed)
+
+`src/components/JobDetailBody.tsx` (the client visit screen AND the chat visit popup): the header facts are a grid like the staff
+sheet — Scheduled, Service #, Crew lead, **Approval**, **Priority**, **Panels cleaned** (empty ones hidden); PHOTOS gains a
+**Toolbox talk (TBT)** strip (from `job.tbt_photos` if the backend ever sends it, otherwise the client's own `/documentation/tbt`
+list filtered to this schedule — works today, no backend change); a new **ATTENDANCE · N ON SITE** card (name, status, in/out
+times, time on site, clock-in/out photos) renders from `job.attendance`. **The client detail endpoint does not send attendance
+or total_panels_cleaned yet** — the exact SQL is in `docs/backend-patches/2026-10-07-client-visit-attendance.md` (the same
+json_agg the staff /schedule/history uses). It is a patch file, not an edited route, ON PURPOSE: the only backend checkout on this
+PC (`Desktop/sowash-backend`, customerJobHistoryRoutes.js dated 21 Sep) is missing the October chat work, so uploading a file
+edited from it would remove those features from the live server — apply the patch to the live file. Until then the Attendance
+section and Panels cleaned simply don't show. `JobDetail` gained optional `attendance`/`tbt_photos`/`total_panels_cleaned`.
+Open decision noted in the patch: clients would also see the crew's clock-in selfies. Rendered both themes with mock data.
 
 ### 2026-10-05 (hold a visit → attach in chat) — Client: long-press any visit for a WhatsApp-style pop-up; "Attach in chat" links it to a message
 

@@ -1260,6 +1260,28 @@ function ThreadView({
     [photoMedia],
   );
 
+  // ── reply (swipe right on a message, or long-press → Reply) ──
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const composerRef = React.useRef<TextInput>(null);
+  const startReply = useCallback((m: ChatMessage) => {
+    setReplyTo(m);
+    setTimeout(() => composerRef.current?.focus(), 60);
+  }, []);
+  const supportReplyRef = (m: ChatMessage): TeamReplyRef => ({
+    id: m.id,
+    sender_name:
+      m.sender_kind === 'agent' && m.sender_user_id === user?.id ? 'You' : m.sender_name || (m.sender_kind === 'customer' ? 'Customer' : 'SoWash'),
+    body: m.body,
+    has_photo: !!m.attachment_url,
+  });
+  const jumpTo = useCallback(
+    (messageId: number) => {
+      const index = messages.findIndex((m) => m.id === messageId);
+      if (index >= 0) listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    },
+    [messages],
+  );
+
   // ── the assigned stretch (yellow bubbles) ──
   const assignedIds = useMemo(() => assignedSpanIds(messages, meta), [messages, meta]);
 
@@ -1359,8 +1381,16 @@ function ThreadView({
   const pickPhoto = () => promptChatPhotoSource(setPhoto);
 
   const onSend = async () => {
-    const ok = await send({ body: draft, photo, scheduleId: null, mentionedUserId, mentionedName });
+    const ok = await send({
+      body: draft,
+      photo,
+      scheduleId: null,
+      mentionedUserId,
+      mentionedName,
+      replyTo: replyTo ? supportReplyRef(replyTo) : null,
+    });
     if (!ok) return;
+    setReplyTo(null);
     setDraft('');
     supportDraftCache.delete(threadId);
     setPhoto(null);
@@ -1553,6 +1583,8 @@ function ThreadView({
               onRetry={retry}
               onDiscard={discard}
               onActions={openActions}
+              onReply={startReply}
+              onJumpTo={jumpTo}
             />
           )}
         />
@@ -1565,6 +1597,10 @@ function ThreadView({
           target={actionTarget}
           accent={accent}
           mine={actionTarget.message.sender_kind === 'agent' && actionTarget.message.sender_user_id === user?.id}
+          onReply={() => {
+            startReply(actionTarget.message);
+            setActionTarget(null);
+          }}
           renderMessage={() => (
             <Bubble
               message={actionTarget.message}
@@ -1593,6 +1629,25 @@ function ThreadView({
         {statusError ? <Text style={s.sendError}>{statusError}</Text> : null}
         {isClosed ? (
           <Text style={s.closedNote}>This conversation is closed — sending a message reopens it.</Text>
+        ) : null}
+
+        {replyTo ? (
+          <View style={[s.replyBar, { borderLeftColor: accent }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.quoteName, { color: accent }]} numberOfLines={1}>
+                Replying to{' '}
+                {replyTo.sender_kind === 'agent' && replyTo.sender_user_id === user?.id
+                  ? 'yourself'
+                  : replyTo.sender_name || (replyTo.sender_kind === 'customer' ? 'the customer' : 'SoWash')}
+              </Text>
+              <Text style={[s.quoteBody, { color: palette.muted }]} numberOfLines={1}>
+                {replyTo.body || (replyTo.attachment_url ? '📷 Photo' : 'Message')}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={8} accessibilityLabel="Cancel reply">
+              <X size={16} color={palette.muted} />
+            </TouchableOpacity>
+          </View>
         ) : null}
 
         {mentionQuery !== null ? (
@@ -1641,6 +1696,7 @@ function ThreadView({
               <ImagePlus size={19} color={palette.muted} />
             </TouchableOpacity>
             <TextInput
+              ref={composerRef}
               value={draft}
               onChangeText={onDraftChange}
               placeholder="Reply… (@ to mention a colleague)"
@@ -1981,6 +2037,8 @@ const Bubble = React.memo(function Bubble({
   onRetry,
   onDiscard,
   onActions,
+  onReply,
+  onJumpTo,
 }: {
   message: ChatMessage;
   accent: string;
@@ -1995,6 +2053,10 @@ const Bubble = React.memo(function Bubble({
   onDiscard: (localId: number) => void;
   /** Long-press: reaction bar; `rect` is the row's window position. */
   onActions: (message: ChatMessage, rect: ActionRect) => void;
+  /** Swipe right → reply (omitted for the copy drawn inside the long-press overlay). */
+  onReply?: (message: ChatMessage) => void;
+  /** Tap a quote → scroll to the original. */
+  onJumpTo?: (messageId: number) => void;
 }) {
   if (message.sender_kind === 'system') return <SystemLine message={message} />;
 
@@ -2009,8 +2071,45 @@ const Bubble = React.memo(function Bubble({
   const rowRef = React.useRef<View>(null);
   const hasReactions = !!reactions && reactions.length > 0;
 
+  // Swipe-right-to-reply — the same gesture as TeamBubble below.
+  const swipeX = React.useRef(new Animated.Value(0)).current;
+  const SWIPE_TRIGGER = 56;
+  const canReply = !!onReply && message.id > 0 && !message.pending && !message.failed;
+  const onSwipe = React.useRef(
+    Animated.event([{ nativeEvent: { translationX: swipeX } }], { useNativeDriver: true }),
+  ).current;
+  const swipeShift = swipeX.interpolate({ inputRange: [0, 80], outputRange: [0, 80], extrapolate: 'clamp' });
+  const onSwipeState = (e: { nativeEvent: { state: number; translationX: number } }) => {
+    const { state, translationX } = e.nativeEvent;
+    if (state === State.END || state === State.CANCELLED || state === State.FAILED) {
+      if (state === State.END && translationX >= SWIPE_TRIGGER) onReply?.(message);
+      Animated.spring(swipeX, { toValue: 0, useNativeDriver: true, bounciness: 6 }).start();
+    }
+  };
+
   return (
     <View ref={rowRef} collapsable={false}>
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          s.swipeHint,
+          {
+            opacity: swipeX.interpolate({ inputRange: [0, SWIPE_TRIGGER], outputRange: [0, 1], extrapolate: 'clamp' }),
+            transform: [{ scale: swipeX.interpolate({ inputRange: [0, SWIPE_TRIGGER], outputRange: [0.6, 1], extrapolate: 'clamp' }) }],
+          },
+        ]}
+      >
+        <Reply size={16} color={palette.muted} />
+      </Animated.View>
+      <PanGestureHandler
+        enabled={canReply}
+        activeOffsetX={14}
+        failOffsetX={-14}
+        failOffsetY={[-12, 12]}
+        onGestureEvent={onSwipe}
+        onHandlerStateChange={onSwipeState}
+      >
+      <Animated.View style={{ transform: [{ translateX: swipeShift }] }}>
       <View style={[s.bubbleLine, { justifyContent: mine ? 'flex-end' : 'flex-start', opacity: message.pending ? 0.6 : 1 }]}>
         {!mine ? (
           <View style={[s.msgAvatar, { backgroundColor: colorFor(name) }]}>
@@ -2036,6 +2135,23 @@ const Bubble = React.memo(function Bubble({
         >
           {mine ? <BubbleGradient accent={accent} amber={assigned} /> : null}
           {!mine && message.sender_name ? <Text style={s.sender}>{message.sender_name}</Text> : null}
+
+          {/* the client replied to a specific message (support-chat reply-to) */}
+          {message.reply_to ? (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              disabled={!onJumpTo}
+              onPress={() => onJumpTo?.(message.reply_to!.id)}
+              style={[s.quote, mine ? s.quoteMine : s.quoteTheirs, { borderLeftColor: mine ? '#fff' : accent }]}
+            >
+              <Text style={[s.quoteName, { color: mine ? '#fff' : accent }]} numberOfLines={1}>
+                {message.reply_to.sender_name || 'Message'}
+              </Text>
+              <Text style={[s.quoteBody, { color: mine ? '#ffffffcc' : palette.muted }]} numberOfLines={2}>
+                {message.reply_to.body || (message.reply_to.has_photo ? '📷 Photo' : 'Message')}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
 
           {message.site_name ? (
             <View style={[s.siteChip, mine ? s.siteChipMine : s.siteChipTheirs]}>
@@ -2090,6 +2206,8 @@ const Bubble = React.memo(function Bubble({
           ) : null}
         </TouchableOpacity>
       </View>
+      </Animated.View>
+      </PanGestureHandler>
     </View>
   );
 });

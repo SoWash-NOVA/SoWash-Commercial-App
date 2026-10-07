@@ -92,6 +92,13 @@ export interface Site {
   system_type: string | null;
   installation_status: string | null;
   installation_date: string | null;
+  /**
+   * commercial_sites.latitude / longitude — Postgres numeric, so node-postgres sends STRINGS
+   * ("31.52040000"). Used by the Overview weather card (extractCoords in app/(tabs)/index.tsx).
+   * Only sent once docs/backend-patches/2026-10-07-client-sites-coordinates.md is deployed.
+   */
+  latitude?: string | number | null;
+  longitude?: string | number | null;
 }
 
 export interface SitesResponse {
@@ -165,6 +172,16 @@ export type JobScope = 'all' | 'past' | 'upcoming';
  * directly (useSldWalkthrough) and decides from the real data.
  */
 export interface JobDetail extends Omit<JobSummary, 'has_sld_walkthrough'> {
+  /**
+   * Crew clock-in/out for this visit — the same shape the staff Jobs sheet gets. OPTIONAL: only
+   * a backend with docs/backend-patches/2026-10-07-client-visit-attendance.md applied sends it;
+   * without it the client report simply has no Attendance section.
+   */
+  attendance?: StaffAttendanceRecord[];
+  /** Toolbox-talk photos, if the backend ever sends them here; the app otherwise reads /documentation/tbt. */
+  tbt_photos?: StaffTbtPhoto[];
+  /** field_service_reports.total_panels_cleaned (same patch). */
+  total_panels_cleaned?: string | number | null;
   email: string | null;
   installation_status: string | null;
   approved_at: string | null;
@@ -486,6 +503,13 @@ export interface ChatVisitTag {
 
 export interface ChatMessage {
   id: number;
+  /**
+   * Reply-to (WhatsApp-style quote). Only present once the backend patch
+   * docs/backend-patches/2026-10-07-support-chat-replies.md is deployed; an older server simply
+   * never sends it (and ignores reply_to_id on send), so the message goes out without the quote.
+   */
+  reply_to_id?: number | null;
+  reply_to?: TeamReplyRef | null;
   sender_kind: ChatSenderKind;
   /**
    * Staff-only (routes/commercialChatRoutes.js's shapeMessage only —

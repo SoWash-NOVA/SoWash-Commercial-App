@@ -62,10 +62,12 @@ import {
   ImagePlus,
   MapPin,
   MessagesSquare,
+  Reply,
   Send,
   Users,
   X,
 } from 'lucide-react-native';
+import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { palette } from '../../src/theme';
 import { isDark, tc, ttc, soft } from '../../src/themeEngine';
 import { useAccent } from '../../src/theme-context';
@@ -78,7 +80,7 @@ import ChatBackground from '../../src/components/ChatBackground';
 import { shade } from '../../src/utils/color';
 import { GREEN_STOPS } from '../../src/brand';
 import ChatHeaderBar from '../../src/components/ChatHeaderBar';
-import { ChatMessage, ChatRing, JobSummary, TeamReaction } from '../../src/api/types';
+import { ChatMessage, ChatRing, JobSummary, TeamReaction, TeamReplyRef } from '../../src/api/types';
 import { takeChatAttach, useChatAttachRequest } from '../../src/chat-attach';
 // A tagged visit renders as a preview card — photos, site, crew — that opens
 // the whole visit in a sheet. See src/components/ChatVisitCard.tsx.
@@ -526,6 +528,18 @@ function ChatThread({
 
   const [draft, setDraft] = useState('');
   const [photo, setPhoto] = useState<ChatPhotoInput | null>(null);
+  // ── reply (swipe right on a message, or long-press → Reply) ──
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const startReply = useCallback((m: ChatMessage) => {
+    setReplyTo(m);
+    setTimeout(() => inputRef.current?.focus(), 60);
+  }, []);
+  const replyRef = (m: ChatMessage): TeamReplyRef => ({
+    id: m.id,
+    sender_name: isMine(m, myUserId) ? 'You' : m.sender_name || (m.sender_kind === 'agent' ? 'SoWash' : 'Colleague'),
+    body: m.body,
+    has_photo: !!m.attachment_url,
+  });
   const [tagId, setTagId] = useState<number | null>(attach?.schedule_id ?? null);
   const [tagOpen, setTagOpen] = useState(false);
   // The attached visit itself — it may not be in the picker's own (latest 20) list.
@@ -561,6 +575,13 @@ function ChatThread({
   );
 
   const rows = useMemo(() => buildRows(messages), [messages]);
+  const jumpTo = useCallback(
+    (messageId: number) => {
+      const index = rows.findIndex((r) => r.kind !== 'separator' && r.message.id === messageId);
+      if (index >= 0) listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.4 });
+    },
+    [rows],
+  );
 
   const isActive = useMemo(() => {
     const lastAgent = [...messages].reverse().find((m) => m.sender_kind !== 'customer');
@@ -617,11 +638,13 @@ function ChatThread({
       scheduleId: tagId,
       siteId: site?.id ?? null,
       siteName: site?.site_name ?? null,
+      replyTo: replyTo ? replyRef(replyTo) : null,
     });
     if (!ok) return;
     setDraft('');
     setPhoto(null);
     setTagId(null);
+    setReplyTo(null);
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   };
 
@@ -735,6 +758,11 @@ function ChatThread({
           maxToRenderPerBatch={60}
           windowSize={31}
           removeClippedSubviews={false}
+          // Variable bubble heights: estimate, then retry once layout catches up (quote → jump).
+          onScrollToIndexFailed={(info) => {
+            listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+            setTimeout(() => listRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.4 }), 120);
+          }}
           renderItem={({ item }) =>
             item.kind === 'separator' ? (
               <View style={s.daySep}>
@@ -753,6 +781,8 @@ function ChatThread({
                 onRetry={retry}
                 onDiscard={discard}
                 onActions={openActions}
+                onReply={startReply}
+                onJumpTo={jumpTo}
               />
             )
           }
@@ -780,6 +810,10 @@ function ChatThread({
               onActions={() => {}}
             />
           )}
+          onReply={() => {
+            startReply(actionTarget.message);
+            setActionTarget(null);
+          }}
           onReact={(emoji) => {
             react(actionTarget.message.id, emoji);
             setActionTarget(null);
@@ -791,6 +825,23 @@ function ChatThread({
       {/* ── Composer — WhatsApp-style rounded pill ──────────────────── */}
       <View style={[s.composerWrap, { paddingBottom: composerClearance }]}>
         {error && messages.length > 0 ? <Text style={s.sendError}>{error}</Text> : null}
+
+        {replyTo ? (
+          <View style={[s.replyBar, { borderLeftColor: accent }]}>
+            <Reply size={15} color={accent} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[s.quoteName, { color: accent }]} numberOfLines={1}>
+                Replying to {isMine(replyTo, myUserId) ? 'yourself' : replyTo.sender_name || 'SoWash'}
+              </Text>
+              <Text style={[s.quoteBody, { color: palette.muted }]} numberOfLines={1}>
+                {replyTo.body || (replyTo.attachment_url ? '📷 Photo' : 'Message')}
+              </Text>
+            </View>
+            <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={10} accessibilityLabel="Cancel reply">
+              <X size={16} color={palette.muted} />
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         {(photo || taggedVisit) ? (
           <View style={s.attachRow}>
@@ -922,6 +973,8 @@ const Bubble = React.memo(function Bubble({
   onRetry,
   onDiscard,
   onActions,
+  onReply,
+  onJumpTo,
 }: {
   message: ChatMessage;
   accent: string;
@@ -932,6 +985,9 @@ const Bubble = React.memo(function Bubble({
   onRetry: (localId: number) => void;
   onDiscard: (localId: number) => void;
   onActions: (message: ChatMessage, rect: ActionRect) => void;
+  /** Swipe right → reply (omitted for the copy drawn inside the long-press overlay). */
+  onReply?: (message: ChatMessage) => void;
+  onJumpTo?: (messageId: number) => void;
 }) {
   const mine = isMine(message, myUserId);
   const url = (message.pending || message.failed) && message.localPhotoUri ? message.localPhotoUri : photoUrl(message.attachment_url);
@@ -946,8 +1002,45 @@ const Bubble = React.memo(function Bubble({
   }, {});
   const myReaction = (reactions ?? []).find((r) => r.user_id === myUserId)?.emoji;
 
+  // Swipe-right-to-reply, the same gesture as the staff Team chat (app/staff/chats.tsx): RNGH's
+  // classic PanGestureHandler + native-driven Animated, horizontal-only so the list keeps its
+  // vertical scroll.
+  const swipeX = useRef(new Animated.Value(0)).current;
+  const SWIPE_TRIGGER = 56;
+  const canReply = !!onReply && message.id > 0 && !message.pending && !message.failed;
+  const onSwipe = useRef(Animated.event([{ nativeEvent: { translationX: swipeX } }], { useNativeDriver: true })).current;
+  const swipeShift = swipeX.interpolate({ inputRange: [0, 80], outputRange: [0, 80], extrapolate: 'clamp' });
+  const onSwipeState = (e: { nativeEvent: { state: number; translationX: number } }) => {
+    const { state, translationX } = e.nativeEvent;
+    if (state === State.END || state === State.CANCELLED || state === State.FAILED) {
+      if (state === State.END && translationX >= SWIPE_TRIGGER) onReply?.(message);
+      Animated.spring(swipeX, { toValue: 0, useNativeDriver: true, bounciness: 6 }).start();
+    }
+  };
+
   return (
     <View ref={rowRef} collapsable={false}>
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          s.swipeHint,
+          {
+            opacity: swipeX.interpolate({ inputRange: [0, SWIPE_TRIGGER], outputRange: [0, 1], extrapolate: 'clamp' }),
+            transform: [{ scale: swipeX.interpolate({ inputRange: [0, SWIPE_TRIGGER], outputRange: [0.6, 1], extrapolate: 'clamp' }) }],
+          },
+        ]}
+      >
+        <Reply size={16} color={palette.muted} />
+      </Animated.View>
+      <PanGestureHandler
+        enabled={canReply}
+        activeOffsetX={14}
+        failOffsetX={-14}
+        failOffsetY={[-12, 12]}
+        onGestureEvent={onSwipe}
+        onHandlerStateChange={onSwipeState}
+      >
+      <Animated.View style={{ transform: [{ translateX: swipeShift }] }}>
       <View style={[s.bubbleLine, { justifyContent: mine ? 'flex-end' : 'flex-start', opacity: message.pending ? 0.6 : 1 }]}>
         {!mine ? (
           showAvatar ? (
@@ -985,6 +1078,22 @@ const Bubble = React.memo(function Bubble({
           ) : null}
           {!mine && showName && message.sender_name ? (
             <Text style={[s.sender, { color: accent }]}>{message.sender_name}</Text>
+          ) : null}
+
+          {message.reply_to ? (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              disabled={!onJumpTo}
+              onPress={() => onJumpTo?.(message.reply_to!.id)}
+              style={[s.quote, mine ? s.quoteMine : s.quoteTheirs, { borderLeftColor: mine ? '#fff' : accent }]}
+            >
+              <Text style={[s.quoteName, { color: mine ? '#fff' : accent }]} numberOfLines={1}>
+                {message.reply_to.sender_name || 'SoWash'}
+              </Text>
+              <Text style={[s.quoteBody, { color: mine ? '#ffffffcc' : palette.muted }]} numberOfLines={2}>
+                {message.reply_to.body || (message.reply_to.has_photo ? '📷 Photo' : 'Message')}
+              </Text>
+            </TouchableOpacity>
           ) : null}
 
           {message.site_name ? (
@@ -1042,6 +1151,8 @@ const Bubble = React.memo(function Bubble({
           ) : null}
         </TouchableOpacity>
       </View>
+      </Animated.View>
+      </PanGestureHandler>
     </View>
   );
 });
@@ -1051,7 +1162,7 @@ const Bubble = React.memo(function Bubble({
  * and a pill of quick reactions sits next to it. In-screen (not a Modal) —
  * positions are converted from window coordinates using this view's own
  * measured window origin. Same behaviour as the staff app's overlay in
- * app/staff/chats.tsx, minus the "+" picker and Reply (not in this chat).
+ * app/staff/chats.tsx, minus the "+" picker; Reply is the round button at the end of the pill.
  */
 function ReactionOverlay({
   rect,
@@ -1060,6 +1171,7 @@ function ReactionOverlay({
   myEmoji,
   renderMessage,
   onReact,
+  onReply,
   onClose,
 }: {
   rect: ActionRect;
@@ -1068,6 +1180,8 @@ function ReactionOverlay({
   myEmoji: string | null;
   renderMessage: () => React.ReactNode;
   onReact: (emoji: string) => void;
+  /** Adds a Reply button to the menu. */
+  onReply?: () => void;
   onClose: () => void;
 }) {
   const rootRef = useRef<View>(null);
@@ -1125,6 +1239,11 @@ function ReactionOverlay({
                 </TouchableOpacity>
               </Animated.View>
             ))}
+            {onReply ? (
+              <TouchableOpacity style={s.pillReply} activeOpacity={0.7} onPress={onReply} accessibilityLabel="Reply">
+                <Reply size={20} color={accent} />
+              </TouchableOpacity>
+            ) : null}
           </Animated.View>
         </>
       ) : null}
@@ -1327,6 +1446,33 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   pillEmoji: { fontSize: 28, lineHeight: 34 },
+  pillReply: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    marginLeft: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f1f5f9',
+  },
+  // reply: the arrow that appears while swiping, the quote inside a bubble, the bar above the composer
+  swipeHint: { position: 'absolute', left: 10, top: 0, bottom: 0, width: 30, justifyContent: 'center', alignItems: 'center' },
+  quote: { borderLeftWidth: 3, borderRadius: 8, paddingVertical: 5, paddingHorizontal: 8, marginBottom: 6 },
+  quoteMine: { backgroundColor: 'rgba(255,255,255,0.18)' },
+  quoteTheirs: { backgroundColor: 'rgba(0,0,0,0.05)' },
+  quoteName: { fontSize: 12, fontWeight: '800' },
+  quoteBody: { fontSize: 12.5, marginTop: 1 },
+  replyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderLeftWidth: 3,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    marginBottom: 8,
+  },
   failedRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 6 },
   failedText: { fontSize: 11.5, fontWeight: '700', color: '#ffd6d6' },
   failedAction: { fontSize: 12, fontWeight: '800', color: '#fff', textDecorationLine: 'underline' },

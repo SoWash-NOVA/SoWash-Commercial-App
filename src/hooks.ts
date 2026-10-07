@@ -692,6 +692,8 @@ export interface ChatPhotoInput {
 
 export interface SendChatArgs {
   body?: string | null;
+  /** The message being replied to (sent as reply_to_id; also drawn on the optimistic bubble). */
+  replyTo?: TeamReplyRef | null;
   photo?: ChatPhotoInput | null;
   scheduleId?: number | null;
   /** The site this message is about (a label on the message — there is still one shared thread). */
@@ -837,7 +839,7 @@ export function useChat(myUserId?: number | null) {
 
   /** The network half of a send. Never throws; on failure the bubble is kept, marked `failed`. */
   const post = useCallback(
-    async (localId: number, { body, photo, scheduleId, siteId, siteName }: SendChatArgs): Promise<void> => {
+    async (localId: number, { body, photo, scheduleId, siteId, siteName, replyTo }: SendChatArgs): Promise<void> => {
       const text = (body ?? '').trim();
       setSending(true);
       try {
@@ -845,6 +847,7 @@ export function useChat(myUserId?: number | null) {
         if (text) form.append('body', text);
         if (scheduleId) form.append('schedule_id', String(scheduleId));
         if (siteId) form.append('site_id', String(siteId));
+        if (replyTo) form.append('reply_to_id', String(replyTo.id));
         if (photo) {
           // React Native's FormData takes this shape for a file; it is not the
           // web File object and TypeScript has no type for it.
@@ -869,7 +872,7 @@ export function useChat(myUserId?: number | null) {
         });
         if (data?.message) rememberLast([data.message]);
       } catch {
-        failedSendsRef.current.set(localId, { body, photo, scheduleId, siteId, siteName });
+        failedSendsRef.current.set(localId, { body, photo, scheduleId, siteId, siteName, replyTo });
         setMessages((prev) => prev.map((m) => (m.id === localId ? { ...m, pending: false, failed: true } : m)));
       } finally {
         setSending(false);
@@ -899,6 +902,7 @@ export function useChat(myUserId?: number | null) {
         visit: null,
         site_id: args.siteId ?? null,
         site_name: args.siteName ?? null,
+        reply_to: args.replyTo ?? null,
         pending: true,
         localPhotoUri: args.photo?.uri,
       };
@@ -1171,6 +1175,8 @@ export interface StaffSendChatArgs {
   mentionedUserId?: number | null;
   /** Display name for the optimistic bubble's highlight (the server fills mentioned_name in on the real row). */
   mentionedName?: string | null;
+  /** Reply to this message (sent as reply_to_id — see docs/backend-patches/2026-10-07-support-chat-replies.md). */
+  replyTo?: TeamReplyRef | null;
 }
 
 /** The inbox list. `status` defaults to 'open' — closed threads are a lookup, not the default view. */
@@ -1391,7 +1397,7 @@ export function useStaffChatThread(threadId: number | null, myUserId?: number | 
 
   /** The network half of a send. Never throws; on failure the bubble is kept, marked `failed`. */
   const post = useCallback(
-    async (localId: number, { body, photo, scheduleId, mentionedUserId }: StaffSendChatArgs): Promise<void> => {
+    async (localId: number, { body, photo, scheduleId, mentionedUserId, replyTo }: StaffSendChatArgs): Promise<void> => {
       const text = (body ?? '').trim();
       setSending(true);
       try {
@@ -1399,6 +1405,7 @@ export function useStaffChatThread(threadId: number | null, myUserId?: number | 
         if (text) form.append('body', text);
         if (scheduleId) form.append('schedule_id', String(scheduleId));
         if (mentionedUserId) form.append('mentioned_user_id', String(mentionedUserId));
+        if (replyTo) form.append('reply_to_id', String(replyTo.id));
         if (photo) {
           form.append('photo', {
             uri: photo.uri,
@@ -1423,7 +1430,7 @@ export function useStaffChatThread(threadId: number | null, myUserId?: number | 
         });
         if (data?.message) rememberLast([data.message]);
       } catch {
-        failedSendsRef.current.set(localId, { body, photo, scheduleId, mentionedUserId });
+        failedSendsRef.current.set(localId, { body, photo, scheduleId, mentionedUserId, replyTo });
         setMessages((prev) => prev.map((m) => (m.id === localId ? { ...m, pending: false, failed: true } : m)));
       } finally {
         setSending(false);
@@ -1455,6 +1462,7 @@ export function useStaffChatThread(threadId: number | null, myUserId?: number | 
         visit: null,
         mentioned_user_id: args.mentionedUserId ?? null,
         mentioned_name: args.mentionedName ?? null,
+        reply_to: args.replyTo ?? null,
         pending: true,
         localPhotoUri: args.photo?.uri,
       };
