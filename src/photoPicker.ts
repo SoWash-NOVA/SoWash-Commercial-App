@@ -14,6 +14,7 @@
 import { Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { ChatPhotoInput } from './hooks';
+import { openCameraCapture } from './camera-capture';
 
 async function fromResult(result: ImagePicker.ImagePickerResult): Promise<ChatPhotoInput | null> {
   if (result.canceled || !result.assets?.length) return null;
@@ -43,16 +44,14 @@ export async function pickChatPhoto(source: 'camera' | 'library'): Promise<ChatP
 
 /** The "take photo / choose from library" prompt every composer's photo-attach button shows. */
 export function promptChatPhotoSource(onPicked: (photo: ChatPhotoInput) => void): void {
-  Alert.alert('Add a photo', undefined, [
+  Alert.alert('Add a photo or video', undefined, [
     {
-      text: 'Take Photo',
-      onPress: async () => {
-        const photo = await pickChatPhoto('camera');
-        if (photo) onPicked(photo);
-      },
+      // WhatsApp-style camera: tap = photo, hold = video (src/camera-capture.tsx).
+      text: 'Camera (tap: photo, hold: video)',
+      onPress: () => openCameraCapture(onPicked),
     },
     {
-      text: 'Choose from Library',
+      text: 'Choose Photo from Library',
       onPress: async () => {
         const photo = await pickChatPhoto('library');
         if (photo) onPicked(photo);

@@ -61,6 +61,8 @@ import {
   Clock,
   ImagePlus,
   MapPin,
+  Mic,
+  Video,
   MessagesSquare,
   Reply,
   Send,
@@ -85,6 +87,9 @@ import { takeChatAttach, useChatAttachRequest } from '../../src/chat-attach';
 // A tagged visit renders as a preview card — photos, site, crew — that opens
 // the whole visit in a sheet. See src/components/ChatVisitCard.tsx.
 import ChatVisitCard from '../../src/components/ChatVisitCard';
+import ChatAttachment from '../../src/components/ChatAttachment';
+import { useVoiceHold, VoiceRecordingBar } from '../../src/voiceRecorder';
+import { mediaKind, attachmentLabel } from '../../src/chat-media';
 
 const TAB_BAR_CLEARANCE = 0;
 
@@ -648,6 +653,23 @@ function ChatThread({
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   };
 
+  // Voice note: hold the mic, release to send (src/voiceRecorder.tsx). Sent straight away, like
+  // WhatsApp — it carries the current reply / linked visit but not the typed draft.
+  const voice = useVoiceHold(async (file) => {
+    const ok = await send({
+      body: '',
+      photo: file,
+      scheduleId: tagId,
+      siteId: site?.id ?? null,
+      siteName: site?.site_name ?? null,
+      replyTo: replyTo ? replyRef(replyTo) : null,
+    });
+    if (!ok) return;
+    setTagId(null);
+    setReplyTo(null);
+    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+  });
+
   const canSend = (draft.trim().length > 0 || !!photo) && !sending;
   const composerClearance = 10 + TAB_BAR_CLEARANCE;
 
@@ -834,7 +856,7 @@ function ChatThread({
                 Replying to {isMine(replyTo, myUserId) ? 'yourself' : replyTo.sender_name || 'SoWash'}
               </Text>
               <Text style={[s.quoteBody, { color: palette.muted }]} numberOfLines={1}>
-                {replyTo.body || (replyTo.attachment_url ? '📷 Photo' : 'Message')}
+                {replyTo.body || (replyTo.attachment_url ? attachmentLabel(replyTo.attachment_name || replyTo.attachment_url) : 'Message')}
               </Text>
             </View>
             <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={10} accessibilityLabel="Cancel reply">
@@ -847,9 +869,13 @@ function ChatThread({
           <View style={s.attachRow}>
             {photo ? (
               <View style={s.attachChip}>
-                <Image source={{ uri: photo.uri }} style={s.attachThumb} />
+                {mediaKind(photo.name || photo.uri) === 'video' ? (
+                  <Video size={16} color={palette.muted} />
+                ) : (
+                  <Image source={{ uri: photo.uri }} style={s.attachThumb} />
+                )}
                 <Text style={s.attachText} numberOfLines={1}>
-                  {photo.name || 'Photo'}
+                  {mediaKind(photo.name || photo.uri) === 'video' ? 'Video' : photo.name || 'Photo'}
                 </Text>
                 <TouchableOpacity onPress={() => setPhoto(null)} hitSlop={8}>
                   <X size={14} color={palette.muted} />
@@ -884,6 +910,9 @@ function ChatThread({
         ) : null}
 
         <View style={s.composerRow}>
+          {voice.recording ? (
+            <VoiceRecordingBar seconds={voice.seconds} cancelling={voice.cancelling} />
+          ) : (
           <View style={s.pill}>
             <TouchableOpacity onPress={pickPhoto} style={s.pillIcon} hitSlop={4}>
               <ImagePlus size={19} color={palette.muted} />
@@ -908,14 +937,25 @@ function ChatThread({
               multiline
             />
           </View>
+          )}
 
-          <TouchableOpacity
-            onPress={onSend}
-            disabled={!canSend}
-            style={[s.sendBtn, { backgroundColor: canSend ? accent : palette.border }]}
-          >
-            {sending ? <ActivityIndicator size="small" color="#fff" /> : <Send size={18} color="#fff" />}
-          </TouchableOpacity>
+          {canSend && !voice.recording ? (
+            <TouchableOpacity
+              onPress={onSend}
+              style={[s.sendBtn, { backgroundColor: accent }]}
+            >
+              {sending ? <ActivityIndicator size="small" color="#fff" /> : <Send size={18} color="#fff" />}
+            </TouchableOpacity>
+          ) : (
+            // Nothing to send → the mic: HOLD to record, release to send, slide left to cancel.
+            <View
+              {...voice.panHandlers}
+              accessibilityLabel="Hold to record a voice message"
+              style={[s.sendBtn, { backgroundColor: voice.cancelling ? '#dc2626' : accent, transform: [{ scale: voice.recording ? 1.2 : 1 }] }]}
+            >
+              <Mic size={20} color="#fff" />
+            </View>
+          )}
         </View>
       </View>
 
@@ -1107,7 +1147,18 @@ const Bubble = React.memo(function Bubble({
 
           {message.visit ? <ChatVisitCard visit={message.visit} mine={mine} /> : null}
 
-          {url ? <Image source={{ uri: url }} style={[s.photo, photoSize]} contentFit="cover" /> : null}
+          {url && mediaKind(message.attachment_name || url) !== 'image' ? (
+            <ChatAttachment
+              url={url}
+              name={message.attachment_name}
+              createdAt={message.created_at}
+              mine={mine}
+              accent={accent}
+              sending={message.pending || message.failed}
+            />
+          ) : url ? (
+            <Image source={{ uri: url }} style={[s.photo, photoSize]} contentFit="cover" />
+          ) : null}
 
           {message.body ? (
             <Text style={[s.text, mine ? { color: '#fff' } : { color: palette.ink }]}>{message.body}</Text>

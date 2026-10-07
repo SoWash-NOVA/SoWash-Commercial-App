@@ -53,6 +53,9 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { promptChatPhotoSource } from '../../src/photoPicker';
+import ChatAttachment from '../../src/components/ChatAttachment';
+import { useVoiceHold, VoiceRecordingBar } from '../../src/voiceRecorder';
+import { mediaKind, attachmentLabel } from '../../src/chat-media';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Not a new native dependency — expo-router/@react-navigation already pull
 // this in for their own screen-transition gestures, so it's already
@@ -81,6 +84,8 @@ import {
   RotateCcw,
   Clock,
   ImagePlus,
+  Mic,
+  Video,
   Images,
   MessagesSquare,
   Pencil,
@@ -1241,7 +1246,7 @@ function ThreadView({
   const photoMedia = useMemo(
     () =>
       messages
-        .filter((m) => !!m.attachment_url)
+        .filter((m) => !!m.attachment_url && mediaKind(m.attachment_name || m.attachment_url) === 'image')
         .map((m) => ({
           id: m.id,
           url: photoUrl(m.attachment_url),
@@ -1399,6 +1404,19 @@ function ThreadView({
     setMentionQuery(null);
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   };
+
+  // Voice note: hold the mic, release to send (src/voiceRecorder.tsx).
+  const voice = useVoiceHold(async (file) => {
+    const ok = await send({
+      body: '',
+      photo: file,
+      scheduleId: null,
+      replyTo: replyTo ? supportReplyRef(replyTo) : null,
+    });
+    if (!ok) return;
+    setReplyTo(null);
+    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+  });
 
   const canSend = (draft.trim().length > 0 || !!photo) && !sending;
   const composerClearance = 10 + TAB_BAR_CLEARANCE;
@@ -1641,7 +1659,7 @@ function ThreadView({
                   : replyTo.sender_name || (replyTo.sender_kind === 'customer' ? 'the customer' : 'SoWash')}
               </Text>
               <Text style={[s.quoteBody, { color: palette.muted }]} numberOfLines={1}>
-                {replyTo.body || (replyTo.attachment_url ? '📷 Photo' : 'Message')}
+                {replyTo.body || (replyTo.attachment_url ? attachmentLabel(replyTo.attachment_name || replyTo.attachment_url) : 'Message')}
               </Text>
             </View>
             <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={8} accessibilityLabel="Cancel reply">
@@ -1679,9 +1697,13 @@ function ThreadView({
         {photo ? (
           <View style={s.attachRow}>
             <View style={s.attachChip}>
-              <Image source={{ uri: photo.uri }} style={s.attachThumb} />
+              {mediaKind(photo.name || photo.uri) === 'video' ? (
+                <Video size={16} color={palette.muted} />
+              ) : (
+                <Image source={{ uri: photo.uri }} style={s.attachThumb} />
+              )}
               <Text style={s.attachText} numberOfLines={1}>
-                {photo.name || 'Photo'}
+                {mediaKind(photo.name || photo.uri) === 'video' ? 'Video' : photo.name || 'Photo'}
               </Text>
               <TouchableOpacity onPress={() => setPhoto(null)} hitSlop={8}>
                 <X size={14} color={palette.muted} />
@@ -1691,6 +1713,9 @@ function ThreadView({
         ) : null}
 
         <View style={s.composerRow}>
+          {voice.recording ? (
+            <VoiceRecordingBar seconds={voice.seconds} cancelling={voice.cancelling} />
+          ) : (
           <View style={s.pill}>
             <TouchableOpacity onPress={pickPhoto} style={s.pillIcon} hitSlop={4}>
               <ImagePlus size={19} color={palette.muted} />
@@ -1705,13 +1730,21 @@ function ThreadView({
               multiline
             />
           </View>
-          <TouchableOpacity
-            onPress={onSend}
-            disabled={!canSend}
-            style={[s.sendBtn, { backgroundColor: canSend ? accent : palette.border }]}
-          >
-            {sending ? <ActivityIndicator size="small" color="#fff" /> : <Send size={18} color="#fff" />}
-          </TouchableOpacity>
+          )}
+          {canSend && !voice.recording ? (
+            <TouchableOpacity onPress={onSend} style={[s.sendBtn, { backgroundColor: accent }]}>
+              {sending ? <ActivityIndicator size="small" color="#fff" /> : <Send size={18} color="#fff" />}
+            </TouchableOpacity>
+          ) : (
+            // Nothing to send → the mic: HOLD to record, release to send, slide left to cancel.
+            <View
+              {...voice.panHandlers}
+              accessibilityLabel="Hold to record a voice message"
+              style={[s.sendBtn, { backgroundColor: voice.cancelling ? '#dc2626' : accent, transform: [{ scale: voice.recording ? 1.2 : 1 }] }]}
+            >
+              <Mic size={20} color="#fff" />
+            </View>
+          )}
         </View>
       </View>
     </KeyboardScreen>
@@ -2164,7 +2197,16 @@ const Bubble = React.memo(function Bubble({
 
           {message.visit ? <VisitTagSummary visit={message.visit} mine={mine} /> : null}
 
-          {url ? (
+          {url && mediaKind(message.attachment_name || url) !== 'image' ? (
+            <ChatAttachment
+              url={url}
+              name={message.attachment_name}
+              createdAt={message.created_at}
+              mine={mine}
+              accent={accent}
+              sending={message.pending || message.failed}
+            />
+          ) : url ? (
             <TouchableOpacity activeOpacity={0.9} disabled={message.pending || message.failed} onPress={() => onOpenPhoto(message.id)}>
               <Image source={{ uri: url }} style={[s.photo, photoSize]} contentFit="cover" />
             </TouchableOpacity>
@@ -2368,7 +2410,16 @@ const TeamBubble = React.memo(function TeamBubble({
           </TouchableOpacity>
         ) : null}
 
-        {url ? (
+        {url && mediaKind(message.attachment_name || url) !== 'image' ? (
+          <ChatAttachment
+            url={url}
+            name={message.attachment_name}
+            createdAt={message.created_at}
+            mine={mine}
+            accent={accent}
+            sending={message.pending || message.failed}
+          />
+        ) : url ? (
           <TouchableOpacity activeOpacity={0.9} disabled={message.pending || message.failed} onPress={() => onOpenPhoto(message.id)}>
             <Image source={{ uri: url }} style={[s.photo, photoSize]} contentFit="cover" />
           </TouchableOpacity>
@@ -2700,7 +2751,7 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
   const photoMedia = useMemo(
     () =>
       messages
-        .filter((m) => !!m.attachment_url)
+        .filter((m) => !!m.attachment_url && mediaKind(m.attachment_name || m.attachment_url) === 'image')
         .map((m) => ({
           id: m.id,
           url: photoUrl(m.attachment_url),
@@ -2884,6 +2935,14 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
     setMentionQuery(null);
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   };
+
+  // Voice note: hold the mic, release to send (src/voiceRecorder.tsx).
+  const voice = useVoiceHold(async (file) => {
+    const ok = await send({ body: '', photo: file, replyTo: replyTo ? replyRef(replyTo) : null });
+    if (!ok) return;
+    setReplyTo(null);
+    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+  });
 
   const canSend = (draft.trim().length > 0 || !!photo) && !sending;
   const composerClearance = 10 + TAB_BAR_CLEARANCE;
@@ -3108,7 +3167,7 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
                 Replying to {replyTo.sender_user_id === user?.id ? 'yourself' : replyTo.sender_name || 'colleague'}
               </Text>
               <Text style={[s.quoteBody, { color: palette.muted }]} numberOfLines={1}>
-                {replyTo.body || (replyTo.attachment_url ? 'Photo' : 'Message')}
+                {replyTo.body || (replyTo.attachment_url ? attachmentLabel(replyTo.attachment_name || replyTo.attachment_url) : 'Message')}
               </Text>
             </View>
             <TouchableOpacity onPress={() => setReplyTo(null)} hitSlop={8}>
@@ -3156,9 +3215,13 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
         {photo ? (
           <View style={s.attachRow}>
             <View style={s.attachChip}>
-              <Image source={{ uri: photo.uri }} style={s.attachThumb} />
+              {mediaKind(photo.name || photo.uri) === 'video' ? (
+                <Video size={16} color={palette.muted} />
+              ) : (
+                <Image source={{ uri: photo.uri }} style={s.attachThumb} />
+              )}
               <Text style={s.attachText} numberOfLines={1}>
-                {photo.name || 'Photo'}
+                {mediaKind(photo.name || photo.uri) === 'video' ? 'Video' : photo.name || 'Photo'}
               </Text>
               <TouchableOpacity onPress={() => setPhoto(null)} hitSlop={8}>
                 <X size={14} color={palette.muted} />
@@ -3168,6 +3231,9 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
         ) : null}
 
         <View style={s.composerRow}>
+          {voice.recording ? (
+            <VoiceRecordingBar seconds={voice.seconds} cancelling={voice.cancelling} />
+          ) : (
           <View style={s.pill}>
             <TouchableOpacity onPress={pickPhoto} style={s.pillIcon} hitSlop={4}>
               <ImagePlus size={19} color={palette.muted} />
@@ -3181,13 +3247,21 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
               multiline
             />
           </View>
-          <TouchableOpacity
-            onPress={onSend}
-            disabled={!canSend}
-            style={[s.sendBtn, { backgroundColor: canSend ? accent : palette.border }]}
-          >
-            {sending ? <ActivityIndicator size="small" color="#fff" /> : <Send size={18} color="#fff" />}
-          </TouchableOpacity>
+          )}
+          {canSend && !voice.recording ? (
+            <TouchableOpacity onPress={onSend} style={[s.sendBtn, { backgroundColor: accent }]}>
+              {sending ? <ActivityIndicator size="small" color="#fff" /> : <Send size={18} color="#fff" />}
+            </TouchableOpacity>
+          ) : (
+            // Nothing to send → the mic: HOLD to record, release to send, slide left to cancel.
+            <View
+              {...voice.panHandlers}
+              accessibilityLabel="Hold to record a voice message"
+              style={[s.sendBtn, { backgroundColor: voice.cancelling ? '#dc2626' : accent, transform: [{ scale: voice.recording ? 1.2 : 1 }] }]}
+            >
+              <Mic size={20} color="#fff" />
+            </View>
+          )}
         </View>
       </View>
     </KeyboardScreen>
@@ -3392,7 +3466,7 @@ function GroupInfoView({
   const media = useMemo(
     () =>
       messages
-        .filter((m) => !!m.attachment_url)
+        .filter((m) => !!m.attachment_url && mediaKind(m.attachment_name || m.attachment_url) === 'image')
         .map((m) => ({
           id: m.id,
           url: photoUrl(m.attachment_url),

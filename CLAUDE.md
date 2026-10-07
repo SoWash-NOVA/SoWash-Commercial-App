@@ -420,6 +420,24 @@ Newest first. Each entry: what changed, in which file(s)/repo, and deploy status
 backend's deploys are **manual** — WinSCP sync + `pm2 restart` on the VPS, nothing here
 auto-deploys, so "fixed" below means "fixed in this working tree," not "live").
 
+### 2026-10-07 (voice + video) — Voice notes and hold-to-record video in all three chats (written, typecheck + Android bundle OK, NOT run on a device; needs a NEW EAS build + backend deploy)
+
+- **Voice note:** the send button becomes a mic when there is nothing to send — HOLD to record, release to send, slide left to cancel
+  (`src/voiceRecorder.tsx`: `useVoiceHold` + `VoiceRecordingBar`, expo-audio; files named `voice-<sec>.m4a`; <1 s = accidental tap, max 5 min).
+  **Camera:** the attach button's "Camera" opens `src/camera-capture.tsx` (one `CameraCaptureHost` in `app/_layout.tsx`): tap the shutter = photo,
+  HOLD = video, max 30 s, 480p, files `video-<sec>.mp4` (expo-camera). Bubbles: `src/components/ChatAttachment.tsx` (voice player, lazy native
+  player per tapped note; video tile → full-screen expo-video modal). `src/chat-media.ts` tells kinds apart BY FILE NAME (no schema change).
+  Wired into client Support (`app/(tabs)/support.tsx`), staff Support thread and Team thread (`app/staff/chats.tsx`); photo viewers skip non-images.
+- **Retention (user's rule): voice notes and photos are kept, VIDEOS are deleted 30 days after upload.** Backend `services/chatMedia.js`:
+  shared upload middleware for all three chat routes (field is still `photo`; accepts image/audio/video, video cap 40 MB, others 10 MB) and
+  `startChatVideoCleanup()` (started from `server.js`; every 6 h deletes `.mp4/.mov/.webm` older than 30 days by file mtime in
+  `uploads/commercial-chat` and `uploads/staff-chat`). The message row stays; the apps show "Video expired" once `created_at` is >30 days
+  (`videoExpired`). Inbox previews now say "🎤 Voice message" / "🎥 Video". No migration.
+- **Deploy:** upload `services/chatMedia.js` (new), `server.js`, `routes/{commercialChatRoutes,staffChatRoutes,customerJobHistoryRoutes}.js`, `pm2 restart`.
+  App: new native modules (expo-audio, expo-camera, expo-video) + mic/camera permissions in app.json → **new EAS build required**.
+  Unverified risks: `takePictureAsync` while the camera is in `mode="video"` (used so tap-photo and hold-video share one session);
+  PanResponder hold on the mic inside a scroll/keyboard screen; Android permission prompt eating the first press.
+
 ### 2026-10-07 — SESSION SNAPSHOT: everything done 2026-10-05 → 10-07, and what is still open (read first)
 
 **Done in the app (typecheck clean; every screen rendered at 390px in light AND dark with a mock API + Chrome

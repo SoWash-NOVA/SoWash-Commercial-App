@@ -59,6 +59,21 @@
         }
       ],
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to use your camera to take photos and videos for chat.",
+          "microphonePermission": "Allow $(PRODUCT_NAME) to use your microphone to record video with sound.",
+          "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow $(PRODUCT_NAME) to use your microphone to send voice messages."
+        }
+      ],
+      "expo-video",
+      [
         "./plugins/withFcmNotification",
         {
           "icon": "./assets/notification-icon.png",

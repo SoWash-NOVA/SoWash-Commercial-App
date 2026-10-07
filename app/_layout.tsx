@@ -8,6 +8,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider as NavThemeProvider, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { CameraCaptureHost } from '../src/camera-capture';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { ThemeProvider } from '../src/theme-context';
 import { AuthProvider, useAuth } from '../src/auth/AuthContext';
@@ -202,6 +203,8 @@ export default function RootLayout() {
                       <RootNavigator />
                       {/* After the navigator so it paints over the (empty) status-bar inset; a chat header colours it. */}
                       <TopInsetFill />
+                      {/* In-chat camera (tap = photo, hold = video); opened by src/photoPicker.ts. */}
+                      <CameraCaptureHost />
                     </Shell>
                   </TopInsetProvider>
                 </NavTheme>
