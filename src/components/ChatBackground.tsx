@@ -1,6 +1,11 @@
 // src/components/ChatBackground.tsx
 //
-// The wallpaper behind every chat thread: a soft accent-to-indigo gradient with a
+// The wallpaper behind every chat thread and chat list is BrandWallpaper (below): soft
+// logo-colour glows and flowing waves — deliberately not a tiled-icon pattern, which looked like a
+// copy of WhatsApp. The doodle pattern described next is now only used by the 'onDark' / 'plain'
+// tones (surfaces that still ask for it).
+//
+// The doodle pattern: a soft accent-to-indigo gradient with a
 // faint tiled doodle pattern on top. Drawn in react-native-svg (already a
 // dependency) instead of shipping an image, so it follows the accent the user
 // picked, stays crisp on every screen density, and adds nothing to the bundle.
@@ -16,7 +21,7 @@
 
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import Svg, { Circle, Defs, G, LinearGradient, Path, Pattern, Rect, Stop } from 'react-native-svg';
+import Svg, { Circle, Defs, G, LinearGradient, Path, Pattern, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { useAccent } from '../theme-context';
 
 const TILE = 240;
@@ -177,6 +182,54 @@ const LAYOUT: Array<[keyof typeof MOTIFS, number, number, number, number]> = [
  * `tone="onDark"` draws white doodles with no wash — for sitting on top of a coloured
  * surface (the login hero). The default is the chat wallpaper: accent wash + accent doodles.
  */
+/**
+ * The chat wallpaper itself (the default tone): NOT a tiled doodle pattern — that read as a copy of
+ * WhatsApp. It is SoWash's own look: soft logo-colour glows and two flowing waves along the bottom,
+ * the same wave language as the login and the page headers. Translucent brand colours only, so it
+ * sits correctly on both the light and the dark page background, and stays quiet behind the bubbles.
+ */
+function BrandWallpaper() {
+  return (
+    <View pointerEvents="none" style={styles.fill}>
+      <Svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
+        <Defs>
+          <RadialGradient id="bwGlowBlue" cx="50%" cy="50%" r="50%">
+            <Stop offset="0" stopColor="#33B8F0" stopOpacity={0.2} />
+            <Stop offset="1" stopColor="#33B8F0" stopOpacity={0} />
+          </RadialGradient>
+          <RadialGradient id="bwGlowLime" cx="50%" cy="50%" r="50%">
+            <Stop offset="0" stopColor="#7EF505" stopOpacity={0.16} />
+            <Stop offset="1" stopColor="#7EF505" stopOpacity={0} />
+          </RadialGradient>
+          <LinearGradient id="bwWaveA" x1="0" y1="0" x2="1" y2="0">
+            <Stop offset="0" stopColor="#1C9BE0" stopOpacity={0.13} />
+            <Stop offset="1" stopColor="#4CC9A0" stopOpacity={0.1} />
+          </LinearGradient>
+          <LinearGradient id="bwWaveB" x1="0" y1="0" x2="1" y2="0">
+            <Stop offset="0" stopColor="#33B8F0" stopOpacity={0.08} />
+            <Stop offset="1" stopColor="#7EF505" stopOpacity={0.12} />
+          </LinearGradient>
+        </Defs>
+        {/* soft glows: blue from the top-right, lime from the lower-left */}
+        <Circle cx={100} cy={4} r={62} fill="url(#bwGlowBlue)" />
+        <Circle cx={0} cy={72} r={55} fill="url(#bwGlowLime)" />
+        {/* two layered waves along the bottom */}
+        <Path d="M0 80 C 16 72, 34 90, 54 81 S 86 70, 100 78 L100 100 L0 100 Z" fill="url(#bwWaveA)" />
+        <Path d="M0 90 C 20 84, 40 96, 62 90 S 90 84, 100 89 L100 100 L0 100 Z" fill="url(#bwWaveB)" />
+        {/* one faint ribbon high up, so the page isn't empty above the waves */}
+        <Path
+          d="M0 18 C 22 8, 40 26, 62 16 S 90 6, 100 14"
+          fill="none"
+          stroke="#33B8F0"
+          strokeOpacity={0.12}
+          strokeWidth={0.6}
+          strokeLinecap="round"
+        />
+      </Svg>
+    </View>
+  );
+}
+
 export default function ChatBackground({
   tone = 'accent',
   color,
@@ -188,6 +241,10 @@ export default function ChatBackground({
   const { accent } = useAccent();
   const onDark = tone === 'onDark';
   const plain = tone === 'plain';
+
+  // Chat threads and lists use the default tone → SoWash's own wallpaper. The doodle pattern below is
+  // kept only for the 'onDark' / 'plain' surfaces that still ask for it.
+  if (!onDark && !plain) return <BrandWallpaper />;
 
   return (
     <View pointerEvents="none" style={styles.fill}>

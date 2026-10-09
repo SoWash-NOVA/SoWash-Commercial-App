@@ -24,6 +24,7 @@ import {
   ProfileResponse,
   SitesResponse,
   ChatDeltaResponse,
+  ChatReceipts,
   ChatMessage,
   ChatResponse,
   ChatThread,
@@ -500,6 +501,8 @@ export function notificationTarget(n: {
   // A chat reply opens the conversation, not a visit. There is one thread per
   // account, so the thread id is not needed in the route.
   if (n.type === 'chat_reply') return '/support';
+  // Staff pushes about a support conversation (assigned / due soon / overdue) open the Chats tab.
+  if (typeof n.type === 'string' && n.type.startsWith('commercial_chat_')) return '/staff/chats';
   // Internal staff chat lives inside app/staff/chats.tsx as a second section,
   // not its own route — a `team` query param is how that screen knows which
   // conversation to open on mount. No conversation_id (should not normally
@@ -706,6 +709,14 @@ export interface SendChatArgs {
 const reactionSig = (list: TeamReaction[]) =>
   list.map((r) => `${r.message_id}:${r.user_id}:${r.emoji}`).sort().join('|');
 
+const CLIENT_CHAT_CACHE_KEY = 'client-chat';
+interface ClientChatSnapshot {
+  thread: ChatThread | null;
+  messages: ChatMessage[];
+  reactions: TeamReaction[];
+  receipts: ChatReceipts;
+}
+
 /**
  * The conversation.
  *
@@ -714,19 +725,33 @@ const reactionSig = (list: TeamReaction[]) =>
  * which the load/refresh/error shape covers.
  */
 export function useChat(myUserId?: number | null) {
-  const [thread, setThread] = useState<ChatThread | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [reactions, setReactions] = useState<TeamReaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Open instantly: the last copy of this conversation (kept in memory, cleared on sign-in/out) is shown at once while
+  // the fresh one loads underneath — no blank screen + spinner every time the chat is opened.
+  const cached = dataCache.get<ClientChatSnapshot>(CLIENT_CHAT_CACHE_KEY);
+  const [thread, setThread] = useState<ChatThread | null>(cached?.thread ?? null);
+  const [messages, setMessages] = useState<ChatMessage[]>(cached?.messages ?? []);
+  const [reactions, setReactions] = useState<TeamReaction[]>(cached?.reactions ?? []);
+  // Staff delivered / seen marks for the ticks on my own messages (see ChatReceipts).
+  const [receipts, setReceipts] = useState<ChatReceipts>(
+    cached?.receipts ?? { agent_delivered_at: null, agent_seen_at: null },
+  );
+  const [loading, setLoading] = useState(!cached);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   // From a 2s poll — the client app has no socket (see services/chatTyping.js).
   const [agentTyping, setAgentTyping] = useState(false);
   const [agentTypingName, setAgentTypingName] = useState<string | null>(null);
 
+  // Keep the in-memory copy current for the next open.
+  useEffect(() => {
+    const real = messages.filter((m) => m.id > 0);
+    if (real.length === 0 && !thread) return;
+    dataCache.set(CLIENT_CHAT_CACHE_KEY, { thread, messages: real, reactions, receipts } satisfies ClientChatSnapshot);
+  }, [thread, messages, reactions, receipts]);
+
   // The poller reads this instead of `messages` so its identity stays stable
   // and the interval is not torn down and rebuilt on every arriving message.
-  const lastIdRef = useRef(0);
+  const lastIdRef = useRef(cached?.messages.reduce((mx, m) => Math.max(mx, m.id), 0) ?? 0);
   // Negative, decrementing — can never collide with a real id.
   const nextLocalIdRef = useRef(0);
   const failedSendsRef = useRef(new Map<number, SendChatArgs>());
@@ -742,6 +767,13 @@ export function useChat(myUserId?: number | null) {
   const adoptReactions = useCallback((next: TeamReaction[] | undefined) => {
     if (!next) return;
     setReactions((prev) => (reactionSig(prev) === reactionSig(next) ? prev : next));
+  }, []);
+
+  const adoptReceipts = useCallback((next: ChatReceipts | undefined) => {
+    if (!next) return;
+    setReceipts((prev) =>
+      prev.agent_delivered_at === next.agent_delivered_at && prev.agent_seen_at === next.agent_seen_at ? prev : next,
+    );
   }, []);
 
   const markRead = useCallback(async () => {
@@ -760,6 +792,7 @@ export function useChat(myUserId?: number | null) {
       // Re-focusing must not wipe a bubble that is still sending / failed.
       setMessages((prev) => [...list, ...prev.filter((m) => m.id < 0)]);
       adoptReactions(data?.reactions);
+      adoptReceipts(data?.receipts);
       rememberLast(list);
       setError(null);
       if ((data?.unread ?? 0) > 0) markRead();
@@ -768,15 +801,16 @@ export function useChat(myUserId?: number | null) {
     } finally {
       setLoading(false);
     }
-  }, [markRead, rememberLast, adoptReactions]);
+  }, [markRead, rememberLast, adoptReactions, adoptReceipts]);
 
   const poll = useCallback(async () => {
     try {
       const { data } = await api.get<ChatDeltaResponse>('customer-portal/chat/messages', {
         params: lastIdRef.current ? { after_id: lastIdRef.current } : undefined,
       });
-      // Before the early return: a reaction can change with no new message.
+      // Before the early return: a reaction / a staff "seen" can change with no new message.
       adoptReactions(data?.reactions);
+      adoptReceipts(data?.receipts);
 
       const fresh = data?.messages ?? [];
       if (fresh.length === 0) return;
@@ -796,7 +830,7 @@ export function useChat(myUserId?: number | null) {
     } catch {
       // Silent. The next tick retries.
     }
-  }, [markRead, rememberLast, adoptReactions]);
+  }, [markRead, rememberLast, adoptReactions, adoptReceipts]);
 
   const pollTyping = useCallback(async () => {
     try {
@@ -982,6 +1016,7 @@ export function useChat(myUserId?: number | null) {
     thread,
     messages,
     reactions,
+    receipts,
     loading,
     error,
     sending,
@@ -1603,13 +1638,14 @@ export function useStaffChatThreadMeta(threadId: number | null) {
    * closed either way with nothing on screen saying otherwise).
    */
   const assign = useCallback(
-    async (userId: number | null): Promise<boolean> => {
+    async (userId: number | null, dueInMinutes?: number | null): Promise<boolean> => {
       if (!threadId) return false;
       setAssignError(null);
       try {
         const { data } = await api.patch<StaffChatThreadDetailResponse>(
           `commercial-chat/threads/${threadId}`,
-          { assigned_user_id: userId },
+          // `due_in_minutes`: the timeline for resolving it (server computes the deadline; omitted = no deadline)
+          userId != null && dueInMinutes ? { assigned_user_id: userId, due_in_minutes: dueInMinutes } : { assigned_user_id: userId },
         );
         if (data?.thread) setThread(data.thread);
         return true;

@@ -555,6 +555,16 @@ export interface ChatThread {
   last_message_at: string | null;
 }
 
+/**
+ * How far SoWash staff got with the client's messages — drives the ticks on the client's own
+ * bubbles: single grey = sent, double grey = delivered (a staff app has loaded the inbox since),
+ * double blue = seen (an agent opened the conversation). Both null on an older server.
+ */
+export interface ChatReceipts {
+  agent_delivered_at: string | null;
+  agent_seen_at: string | null;
+}
+
 export interface ChatResponse {
   success: boolean;
   thread: ChatThread;
@@ -562,6 +572,7 @@ export interface ChatResponse {
   unread: number;
   /** Every reaction in the thread (flat). Optional: absent on an older server. */
   reactions?: TeamReaction[];
+  receipts?: ChatReceipts;
 }
 
 export interface ChatDeltaResponse {
@@ -569,6 +580,7 @@ export interface ChatDeltaResponse {
   messages: ChatMessage[];
   count: number;
   reactions?: TeamReaction[];
+  receipts?: ChatReceipts;
 }
 
 /** One ring a client made for a site, with how far staff got. Status is derived from the shared thread. */
@@ -755,6 +767,13 @@ export interface StaffChatThread {
   last_sender_name: string | null;
   /** Unread FOR THE CALLING AGENT — see AGENT_UNREAD_EXPR's header comment. */
   unread: number;
+  /** Deadline set when the conversation was assigned (null = none). See src/chatDue.tsx. */
+  assigned_at?: string | null;
+  assigned_due_at?: string | null;
+  overdue_notified_at?: string | null;
+  closed_at?: string | null;
+  /** Set when it was closed: true = after the deadline, false = on time, null = there was no deadline. */
+  resolved_late?: boolean | null;
 }
 
 export interface StaffChatThreadsResponse {
@@ -827,6 +846,13 @@ export interface StaffChatThreadDetail {
   email: string | null;
   assigned_name: string | null;
   unread: number;
+  /** Deadline set when the conversation was assigned (null = none). See src/chatDue.tsx. */
+  assigned_at?: string | null;
+  assigned_due_at?: string | null;
+  overdue_notified_at?: string | null;
+  closed_at?: string | null;
+  /** Set when it was closed: true = after the deadline, false = on time, null = there was no deadline. */
+  resolved_late?: boolean | null;
 }
 
 /** A site the client wrote about that no agent has replied to yet. */

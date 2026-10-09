@@ -33,6 +33,7 @@ import { useChatScroll } from '../../src/useChatScroll';
 import { useChatSurface } from '../../src/chat-focus';
 import KeyboardScreen from '../../src/components/KeyboardScreen';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import {
   View,
   Text,
@@ -40,6 +41,7 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
+  BackHandler,
   Modal,
   Pressable,
   Platform,
@@ -49,7 +51,6 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { promptChatPhotoSource } from '../../src/photoPicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Bell,
@@ -57,6 +58,10 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Check,
+  CheckCheck,
+  ChevronDown,
+  ChevronUp,
   CircleAlert,
   Clock,
   ImagePlus,
@@ -65,6 +70,7 @@ import {
   Video,
   MessagesSquare,
   Reply,
+  Search,
   Send,
   Users,
   X,
@@ -87,8 +93,12 @@ import { takeChatAttach, useChatAttachRequest } from '../../src/chat-attach';
 // A tagged visit renders as a preview card — photos, site, crew — that opens
 // the whole visit in a sheet. See src/components/ChatVisitCard.tsx.
 import ChatVisitCard from '../../src/components/ChatVisitCard';
-import ChatAttachment from '../../src/components/ChatAttachment';
-import { useVoiceHold, VoiceRecordingBar } from '../../src/voiceRecorder';
+import ChatAttachment, { ChatPhoto } from '../../src/components/ChatAttachment';
+import { CameraPillButton } from '../../src/camera-capture';
+import PhotoViewerModal, { ViewerPhoto } from '../../src/components/PhotoViewerModal';
+import ChatInfoView from '../../src/components/ChatInfoView';
+import ChatSkeleton from '../../src/components/ChatSkeleton';
+import { useVoiceHold, VoiceMicButton, VoiceRecordingBar } from '../../src/voiceRecorder';
 import { mediaKind, attachmentLabel } from '../../src/chat-media';
 
 const TAB_BAR_CLEARANCE = 0;
@@ -494,6 +504,7 @@ function ChatThread({
   const {
     messages,
     reactions,
+    receipts,
     loading,
     error,
     sending,
@@ -506,6 +517,20 @@ function ChatThread({
     notifyTyping,
     stopTyping,
   } = useChat(myUserId);
+
+  // Ticks on MY messages: single = sent, double grey = delivered (a staff app loaded the inbox
+  // since), double blue = seen (an agent opened the conversation) — the Team chat's three states.
+  const tickFor = useCallback(
+    (m: ChatMessage): 'sent' | 'delivered' | 'seen' | null => {
+      if (!isMine(m, myUserId) || m.id <= 0 || m.pending || m.failed) return null;
+      const sentAt = new Date(m.created_at).getTime();
+      const past = (v: string | null) => !!v && new Date(v).getTime() >= sentAt;
+      if (past(receipts.agent_seen_at)) return 'seen';
+      if (past(receipts.agent_delivered_at)) return 'delivered';
+      return 'sent';
+    },
+    [receipts, myUserId],
+  );
 
   // Long-press a message → the reaction pill (see ReactionOverlay).
   const [actionTarget, setActionTarget] = useState<{ message: ChatMessage; rect: ActionRect } | null>(null);
@@ -580,13 +605,91 @@ function ChatThread({
   );
 
   const rows = useMemo(() => buildRows(messages), [messages]);
-  const jumpTo = useCallback(
-    (messageId: number) => {
-      const index = rows.findIndex((r) => r.kind !== 'separator' && r.message.id === messageId);
-      if (index >= 0) listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.4 });
-    },
-    [rows],
+
+  // Photo viewer: every sent/received photo in the conversation, oldest first (voice notes and
+  // videos have their own players, so only images belong here).
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const viewerPhotos = useMemo<ViewerPhoto[]>(
+    () =>
+      messages
+        .filter((m) => m.id > 0 && !!m.attachment_url && mediaKind(m.attachment_name || m.attachment_url) === 'image')
+        .map((m) => ({
+          id: m.id,
+          url: photoUrl(m.attachment_url) ?? '',
+          senderName: isMine(m, myUserId) ? 'You' : m.sender_name || 'SoWash',
+          createdAt: m.created_at,
+        }))
+        .filter((p) => !!p.url),
+    [messages, myUserId],
   );
+  // These two are handed to EVERY bubble. They read the latest list through refs so their identity
+  // never changes — otherwise each new/sent message (3 list updates per send) re-rendered every
+  // bubble in the chat, which is what made sending a photo or video stutter.
+  const viewerPhotosRef = useRef(viewerPhotos);
+  viewerPhotosRef.current = viewerPhotos;
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const openPhoto = useCallback((messageId: number) => {
+    const i = viewerPhotosRef.current.findIndex((p) => p.id === messageId);
+    if (i >= 0) setViewerIndex(i);
+  }, []);
+  const jumpTo = useCallback((messageId: number) => {
+    const index = rowsRef.current.findIndex((r) => r.kind !== 'separator' && r.message.id === messageId);
+    if (index >= 0) listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.4 });
+  }, []);
+
+  // ── search in this conversation (over the messages loaded), like the staff chats ──
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [matchPos, setMatchPos] = useState(0);
+  const searchMatches = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [] as number[];
+    return messages.filter((m) => m.id > 0 && !!m.body && m.body.toLowerCase().includes(q)).map((m) => m.id);
+  }, [messages, searchQuery]);
+  // newest match first (WhatsApp's default), then step older/newer
+  useEffect(() => {
+    setMatchPos(Math.max(0, searchMatches.length - 1));
+  }, [searchQuery, searchMatches.length]);
+  useEffect(() => {
+    if (!searchOpen || searchMatches.length === 0) return;
+    const id = searchMatches[Math.min(matchPos, searchMatches.length - 1)];
+    const t = setTimeout(() => jumpTo(id), 60);
+    return () => clearTimeout(t);
+  }, [searchOpen, searchMatches, matchPos, jumpTo]);
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery('');
+  }, []);
+  // Android back closes the search bar first
+  useEffect(() => {
+    if (!searchOpen) return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      closeSearch();
+      return true;
+    });
+    return () => sub.remove();
+  }, [searchOpen, closeSearch]);
+
+  // ── "jump to the newest" button, shown once you have scrolled well up (WhatsApp's down-arrow) ──
+  const [showJump, setShowJump] = useState(false);
+  const jumpBaseLenRef = useRef(0);
+  const messagesLenRef = useRef(messages.length);
+  messagesLenRef.current = messages.length;
+  const onListScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      chatScroll.onScroll(e);
+      const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+      const far = contentSize.height - (contentOffset.y + layoutMeasurement.height) > 380;
+      setShowJump((prev) => {
+        if (far && !prev) jumpBaseLenRef.current = messagesLenRef.current; // count what arrives while you are away
+        return prev === far ? prev : far;
+      });
+    },
+    [chatScroll],
+  );
+  const newWhileAway = showJump ? Math.max(0, messages.length - jumpBaseLenRef.current) : 0;
 
   const isActive = useMemo(() => {
     const lastAgent = [...messages].reverse().find((m) => m.sender_kind !== 'customer');
@@ -634,7 +737,6 @@ function ChatThread({
     }
   };
 
-  const pickPhoto = () => promptChatPhotoSource(setPhoto);
 
   const onSend = async () => {
     const ok = await send({
@@ -655,7 +757,7 @@ function ChatThread({
 
   // Voice note: hold the mic, release to send (src/voiceRecorder.tsx). Sent straight away, like
   // WhatsApp — it carries the current reply / linked visit but not the typed draft.
-  const voice = useVoiceHold(async (file) => {
+  const sendMedia = async (file: ChatPhotoInput) => {
     const ok = await send({
       body: '',
       photo: file,
@@ -668,7 +770,8 @@ function ChatThread({
     setTagId(null);
     setReplyTo(null);
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
-  });
+  };
+  const voice = useVoiceHold(sendMedia);
 
   const canSend = (draft.trim().length > 0 || !!photo) && !sending;
   const composerClearance = 10 + TAB_BAR_CLEARANCE;
@@ -679,16 +782,77 @@ function ChatThread({
   const headerName = site?.site_name || 'General';
   const headerColor = site ? colorFor(headerName, SITE_TINTS) : '#0f172a';
 
+  // Tap the conversation name → its info (shared media, who is in it), like the staff Group info.
+  // After every hook above: this early return swaps the whole screen.
+  if (infoOpen) {
+    return (
+      <ChatInfoView
+        title={headerName}
+        messages={messages}
+        myUserId={myUserId}
+        accent={accent}
+        onClose={() => setInfoOpen(false)}
+      />
+    );
+  }
+
   return (
     <KeyboardScreen style={s.screen}>
       <ChatBackground />
 
       {/* ── Header ───────────────────────────────────────────────── */}
       <ChatHeaderBar>
+        {searchOpen ? (
+          <>
+        <TouchableOpacity onPress={closeSearch} style={s.backBtn} hitSlop={8} accessibilityLabel="Close search">
+          <ChevronLeft size={24} color="#fff" />
+        </TouchableOpacity>
+        <TextInput
+          autoFocus
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="Search messages"
+          placeholderTextColor="rgba(255,255,255,0.7)"
+          returnKeyType="search"
+          style={s.searchInput}
+        />
+        {searchQuery.trim() ? (
+          <Text style={s.searchCount}>
+            {searchMatches.length ? `${Math.min(matchPos, searchMatches.length - 1) + 1}/${searchMatches.length}` : '0/0'}
+          </Text>
+        ) : null}
+        <TouchableOpacity
+          onPress={() => setMatchPos((p) => Math.max(0, p - 1))}
+          disabled={searchMatches.length === 0 || matchPos <= 0}
+          hitSlop={8}
+          style={{ opacity: searchMatches.length === 0 || matchPos <= 0 ? 0.4 : 1 }}
+          accessibilityLabel="Previous match"
+        >
+          <ChevronUp size={22} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setMatchPos((p) => Math.min(searchMatches.length - 1, p + 1))}
+          disabled={searchMatches.length === 0 || matchPos >= searchMatches.length - 1}
+          hitSlop={8}
+          style={{ opacity: searchMatches.length === 0 || matchPos >= searchMatches.length - 1 ? 0.4 : 1 }}
+          accessibilityLabel="Next match"
+        >
+          <ChevronDown size={22} color="#fff" />
+        </TouchableOpacity>
+          </>
+        ) : (
+          <>
         <TouchableOpacity onPress={onBack} style={s.backBtn} hitSlop={8}>
           <ChevronLeft size={24} color="#fff" />
         </TouchableOpacity>
 
+        {/* Avatar + name open the conversation info (media, people) — like tapping a group's header in the staff app. */}
+        <TouchableOpacity
+          style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+          activeOpacity={0.8}
+          onPress={() => setInfoOpen(true)}
+          accessibilityLabel="Conversation info"
+        >
         <View style={[s.headerAvatar, { backgroundColor: headerColor }]}>
           {site ? (
             <Text style={s.headerAvatarText}>{initial(headerName)}</Text>
@@ -712,6 +876,16 @@ function ChatThread({
             </View>
           )}
         </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={() => setSearchOpen(true)}
+          activeOpacity={0.8}
+          style={[s.ringBtn, { backgroundColor: 'rgba(255,255,255,0.24)', marginRight: 6 }]}
+          accessibilityLabel="Search in chat"
+        >
+          <Search size={19} color="#fff" />
+        </TouchableOpacity>
 
         <View style={s.ringSlot}>
           {ringing ? (
@@ -733,6 +907,8 @@ function ChatThread({
             )}
           </TouchableOpacity>
         </View>
+          </>
+        )}
       </ChatHeaderBar>
 
       {ringToast ? (
@@ -743,9 +919,9 @@ function ChatThread({
       ) : null}
 
       {loading && messages.length === 0 ? (
-        <View style={s.centre}>
-          <ActivityIndicator size="large" color={accent} />
-        </View>
+        // The chat itself (header, wallpaper, composer) is already on screen; only the messages are still
+        // coming, so they show as soft placeholder bubbles - not a blank screen with a spinner.
+        <ChatSkeleton accent={accent} />
       ) : error && messages.length === 0 ? (
         <View style={s.centre}>
           <View style={s.emptyCard}>
@@ -768,6 +944,7 @@ function ChatThread({
           </View>
         </View>
       ) : (
+        <View style={{ flex: 1 }}>
         <FlatList
           ref={listRef}
           data={rows}
@@ -776,6 +953,10 @@ function ChatThread({
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={chatScroll.onContentSizeChange}
+          // tells the scroll helper whether the reader is at the bottom (auto-follow only then)
+          onScroll={onListScroll}
+          onScrollBeginDrag={chatScroll.onScrollBeginDrag}
+          scrollEventThrottle={64}
           initialNumToRender={60}
           maxToRenderPerBatch={60}
           windowSize={31}
@@ -805,11 +986,39 @@ function ChatThread({
                 onActions={openActions}
                 onReply={startReply}
                 onJumpTo={jumpTo}
+                onOpenPhoto={openPhoto}
+                tick={tickFor(item.message)}
+                searchQuery={searchOpen && searchQuery.trim() ? searchQuery.trim() : undefined}
               />
             )
           }
         />
+        {showJump ? (
+          // WhatsApp's down-arrow: appears once you have scrolled well up; one tap goes to the newest message.
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={s.jumpBtn}
+            onPress={() => {
+              listRef.current?.scrollToEnd({ animated: true });
+              setShowJump(false);
+            }}
+            accessibilityLabel="Scroll to the newest message"
+          >
+            <ChevronDown size={22} color={accent} />
+            {newWhileAway > 0 ? (
+              <View style={[s.jumpBadge, { backgroundColor: accent }]}>
+                <Text style={s.jumpBadgeText}>{newWhileAway > 99 ? '99+' : newWhileAway}</Text>
+              </View>
+            ) : null}
+          </TouchableOpacity>
+        ) : null}
+        </View>
       )}
+
+      {/* Tap a photo → full-screen, swipe through the conversation's photos, pinch to zoom. */}
+      {viewerIndex !== null && viewerPhotos.length > 0 ? (
+        <PhotoViewerModal photos={viewerPhotos} initialIndex={viewerIndex} onClose={() => setViewerIndex(null)} />
+      ) : null}
 
       {actionTarget ? (
         <ReactionOverlay
@@ -911,13 +1120,9 @@ function ChatThread({
 
         <View style={s.composerRow}>
           {voice.recording ? (
-            <VoiceRecordingBar seconds={voice.seconds} cancelling={voice.cancelling} />
+            <VoiceRecordingBar voice={voice} />
           ) : (
           <View style={s.pill}>
-            <TouchableOpacity onPress={pickPhoto} style={s.pillIcon} hitSlop={4}>
-              <ImagePlus size={19} color={palette.muted} />
-            </TouchableOpacity>
-
             <TouchableOpacity
               onPress={() => setTagOpen(true)}
               style={s.pillIcon}
@@ -936,6 +1141,8 @@ function ChatThread({
               style={s.pillInput}
               multiline
             />
+            {/* WhatsApp-style camera: tap = open camera (gallery button inside it), hold = record video straight away. */}
+            <CameraPillButton onPicked={sendMedia} onLibrary={setPhoto} style={s.pillIcon} color={palette.muted} />
           </View>
           )}
 
@@ -948,13 +1155,7 @@ function ChatThread({
             </TouchableOpacity>
           ) : (
             // Nothing to send → the mic: HOLD to record, release to send, slide left to cancel.
-            <View
-              {...voice.panHandlers}
-              accessibilityLabel="Hold to record a voice message"
-              style={[s.sendBtn, { backgroundColor: voice.cancelling ? '#dc2626' : accent, transform: [{ scale: voice.recording ? 1.2 : 1 }] }]}
-            >
-              <Mic size={20} color="#fff" />
-            </View>
+            <VoiceMicButton voice={voice} accent={accent} buttonStyle={s.sendBtn} />
           )}
         </View>
       </View>
@@ -1003,6 +1204,28 @@ function ChatThread({
   );
 }
 
+/** The message text with every case-insensitive occurrence of `query` highlighted (chat search). */
+function Highlighted({ text, query }: { text: string; query: string }) {
+  const q = query.toLowerCase();
+  const lower = text.toLowerCase();
+  const parts: React.ReactNode[] = [];
+  let from = 0;
+  let i = lower.indexOf(q, from);
+  let key = 0;
+  while (i !== -1 && q.length > 0) {
+    if (i > from) parts.push(text.slice(from, i));
+    parts.push(
+      <Text key={key++} style={{ backgroundColor: '#fde047', color: '#111827' }}>
+        {text.slice(i, i + q.length)}
+      </Text>,
+    );
+    from = i + q.length;
+    i = lower.indexOf(q, from);
+  }
+  if (from < text.length) parts.push(text.slice(from));
+  return <>{parts}</>;
+}
+
 const Bubble = React.memo(function Bubble({
   message,
   accent,
@@ -1015,6 +1238,9 @@ const Bubble = React.memo(function Bubble({
   onActions,
   onReply,
   onJumpTo,
+  onOpenPhoto,
+  tick,
+  searchQuery,
 }: {
   message: ChatMessage;
   accent: string;
@@ -1028,6 +1254,12 @@ const Bubble = React.memo(function Bubble({
   /** Swipe right → reply (omitted for the copy drawn inside the long-press overlay). */
   onReply?: (message: ChatMessage) => void;
   onJumpTo?: (messageId: number) => void;
+  /** Tap a photo → open the full-screen viewer on it. */
+  onOpenPhoto?: (messageId: number) => void;
+  /** Delivery state of my own message (null for others' messages / not yet sent). */
+  tick?: 'sent' | 'delivered' | 'seen' | null;
+  /** Highlights this text inside the message (chat search). */
+  searchQuery?: string;
 }) {
   const mine = isMine(message, myUserId);
   const url = (message.pending || message.failed) && message.localPhotoUri ? message.localPhotoUri : photoUrl(message.attachment_url);
@@ -1157,11 +1389,19 @@ const Bubble = React.memo(function Bubble({
               sending={message.pending || message.failed}
             />
           ) : url ? (
-            <Image source={{ uri: url }} style={[s.photo, photoSize]} contentFit="cover" />
+            <TouchableOpacity
+              activeOpacity={0.9}
+              disabled={!onOpenPhoto || message.pending || message.failed}
+              onPress={() => onOpenPhoto?.(message.id)}
+            >
+              <ChatPhoto url={url} width={photoSize.width} height={photoSize.height} uploading={message.pending} />
+            </TouchableOpacity>
           ) : null}
 
           {message.body ? (
-            <Text style={[s.text, mine ? { color: '#fff' } : { color: palette.ink }]}>{message.body}</Text>
+            <Text style={[s.text, mine ? { color: '#fff' } : { color: palette.ink }]}>
+              {searchQuery ? <Highlighted text={message.body} query={searchQuery} /> : message.body}
+            </Text>
           ) : null}
 
           <View style={s.timeRow}>
@@ -1172,6 +1412,12 @@ const Bubble = React.memo(function Bubble({
               <CircleAlert size={13} color="#ffd6d6" />
             ) : message.pending ? (
               <Clock size={12} color="#ffffffaa" />
+            ) : tick === 'seen' ? (
+              <CheckCheck size={13} color="#4fc3f7" />
+            ) : tick === 'delivered' ? (
+              <CheckCheck size={13} color="#ffffffcc" />
+            ) : tick === 'sent' ? (
+              <Check size={13} color="#ffffffaa" />
             ) : null}
           </View>
 
@@ -1366,6 +1612,38 @@ const s = StyleSheet.create({
   ringSlot: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
   ringPulse: { position: 'absolute', width: 42, height: 42, borderRadius: 21 },
   ringBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+
+  // chat search (header) + jump-to-newest button
+  searchInput: { flex: 1, color: '#fff', fontSize: 16, paddingVertical: 6, paddingHorizontal: 4 },
+  searchCount: { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '700', marginRight: 6 },
+  jumpBtn: {
+    position: 'absolute',
+    right: 14,
+    bottom: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.22,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+  },
+  jumpBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -4,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  jumpBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
 
   toast: {
     position: 'absolute',

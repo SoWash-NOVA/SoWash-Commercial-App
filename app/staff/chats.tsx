@@ -52,9 +52,12 @@ import {
   Animated,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { promptChatPhotoSource } from '../../src/photoPicker';
-import ChatAttachment from '../../src/components/ChatAttachment';
-import { useVoiceHold, VoiceRecordingBar } from '../../src/voiceRecorder';
+import ChatAttachment, { ChatPhoto } from '../../src/components/ChatAttachment';
+import ZoomableImage from '../../src/components/ZoomableImage';
+import { CameraPillButton } from '../../src/camera-capture';
+import { DueBadge, DueBanner, TIMELINES, timelineMinutes, useNow } from '../../src/chatDue';
+import { isChatAdmin } from '../../src/chatAdmins';
+import { useVoiceHold, VoiceMicButton, VoiceRecordingBar } from '../../src/voiceRecorder';
 import { mediaKind, attachmentLabel } from '../../src/chat-media';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Not a new native dependency — expo-router/@react-navigation already pull
@@ -66,7 +69,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // install has no babel plugin wired up for it (see CLAUDE.md §6), same
 // reason SldWalkthrough.tsx and the typing-dots bounce both use plain
 // react-native Animated instead.
-import { PinchGestureHandler, PanGestureHandler, TapGestureHandler, State } from 'react-native-gesture-handler';
+import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { useLocalSearchParams, useFocusEffect } from 'expo-router';
 import {
   AtSign,
@@ -644,6 +647,8 @@ function ThreadList({
   const { data, loading, error, refresh } = useStaffChatThreads(status, query);
   const threads = useMemo(() => data?.threads ?? [], [data]);
   const rows = useMemo(() => withHeadings(threads, (t) => dayBucket(t.last_message_at)), [threads]);
+  // keeps the "Due in 40m" / "Overdue by …" badges moving
+  const listNow = useNow(30000);
 
   useFocusEffect(
     useCallback(() => {
@@ -725,7 +730,7 @@ function ThreadList({
             const assignedOpen = item.status === 'open' && item.assigned_user_id != null;
             const assignedToMe = assignedOpen && item.assigned_user_id === user?.id;
             // The assignee AND admins see the yellow (admins hand the work out and follow it up).
-            const mine = assignedOpen && (assignedToMe || isAdminRole(user?.role));
+            const mine = assignedOpen && (assignedToMe || isChatAdmin(user?.email));
             return (
               <FadeInRow index={index}>
                 <TouchableOpacity
@@ -762,6 +767,7 @@ function ThreadList({
                         </Text>
                       </View>
                     ) : null}
+                    <DueBadge thread={item} now={listNow} />
                     {mine ? (
                       <View style={s.assignedMinePill}>
                         <UserPlus size={11} color={ASSIGNED_TEXT} />
@@ -1187,6 +1193,7 @@ function ThreadView({
   const { width: winW } = useWindowDimensions();
   const iconChips = winW < 600;
   const isClosed = meta?.status === 'closed';
+  const threadNow = useNow(30000);
   const waitingSites = meta?.waiting_sites ?? [];
 
   // A new ring (or your own reply) changes who is waiting — re-read it
@@ -1201,10 +1208,22 @@ function ThreadView({
     setStatusError(null);
     const ok = await setStatus(isClosed ? 'open' : 'closed');
     setClosing(false);
-    if (!ok) setStatusError(isClosed ? 'Could not reopen this conversation.' : 'Could not close this conversation.');
+    if (!ok) setStatusError(isClosed ? 'Could not reopen this conversation.' : 'Could not close this conversation (only the assigned person or an admin can close it).');
   };
+  // Once assigned, only the assigned person or an admin can CLOSE it (the server enforces this too).
+  const canClose =
+    (!!meta?.assigned_user_id && meta.assigned_user_id === user?.id) || isChatAdmin(user?.email);
   const toggleClosed = () => {
     if (closing) return;
+    if (!isClosed && !canClose) {
+      Alert.alert(
+        'Not allowed',
+        meta?.assigned_user_id
+          ? `This conversation is assigned to ${meta?.assigned_name || 'a colleague'}. Only they or an admin can close it.`
+          : 'This conversation is not assigned yet. Only an admin can close it.',
+      );
+      return;
+    }
     // Closing closes the WHOLE conversation, but a client can have rung for
     // several sites in it — don't let a still-waiting site slip away unseen.
     if (!isClosed && waitingSites.length > 0) {
@@ -1257,13 +1276,14 @@ function ThreadView({
   );
   // useCallback: Bubble is React.memo — a fresh function per render would
   // re-render every bubble on every keystroke.
-  const openPhoto = useCallback(
-    (messageId: number) => {
-      const idx = photoMedia.findIndex((m) => m.id === messageId);
-      if (idx >= 0) setPhotoViewerIndex(idx);
-    },
-    [photoMedia],
-  );
+  // Stable identity (reads the latest list via a ref): these go to every bubble, and a callback that
+  // changed with each new message re-rendered the whole chat on every send.
+  const photoMediaRef = React.useRef(photoMedia);
+  photoMediaRef.current = photoMedia;
+  const openPhoto = useCallback((messageId: number) => {
+    const idx = photoMediaRef.current.findIndex((m) => m.id === messageId);
+    if (idx >= 0) setPhotoViewerIndex(idx);
+  }, []);
 
   // ── reply (swipe right on a message, or long-press → Reply) ──
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
@@ -1279,13 +1299,12 @@ function ThreadView({
     body: m.body,
     has_photo: !!m.attachment_url,
   });
-  const jumpTo = useCallback(
-    (messageId: number) => {
-      const index = messages.findIndex((m) => m.id === messageId);
-      if (index >= 0) listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
-    },
-    [messages],
-  );
+  const messagesRef = React.useRef(messages);
+  messagesRef.current = messages;
+  const jumpTo = useCallback((messageId: number) => {
+    const index = messagesRef.current.findIndex((m) => m.id === messageId);
+    if (index >= 0) listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+  }, []);
 
   // ── the assigned stretch (yellow bubbles) ──
   const assignedIds = useMemo(() => assignedSpanIds(messages, meta), [messages, meta]);
@@ -1383,7 +1402,6 @@ function ThreadView({
     setMentionQuery(null);
   };
 
-  const pickPhoto = () => promptChatPhotoSource(setPhoto);
 
   const onSend = async () => {
     const ok = await send({
@@ -1405,8 +1423,9 @@ function ThreadView({
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   };
 
-  // Voice note: hold the mic, release to send (src/voiceRecorder.tsx).
-  const voice = useVoiceHold(async (file) => {
+  // Voice note (hold the mic, src/voiceRecorder.tsx) and recorded video are sent straight away —
+  // no Send button, like WhatsApp.
+  const sendMedia = async (file: ChatPhotoInput) => {
     const ok = await send({
       body: '',
       photo: file,
@@ -1416,7 +1435,8 @@ function ThreadView({
     if (!ok) return;
     setReplyTo(null);
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
-  });
+  };
+  const voice = useVoiceHold(sendMedia);
 
   const canSend = (draft.trim().length > 0 || !!photo) && !sending;
   const composerClearance = 10 + TAB_BAR_CLEARANCE;
@@ -1481,8 +1501,11 @@ function ThreadView({
                     : 'Client conversation'}
             </Text>
           </View>
+          {/* Only an admin hands conversations out. Everyone else just sees who it is assigned to. */}
+          {isChatAdmin(user?.email) || meta?.assigned_name ? (
           <TouchableOpacity
-            onPress={() => setAssignOpen(true)}
+            onPress={isChatAdmin(user?.email) ? () => setAssignOpen(true) : undefined}
+            disabled={!isChatAdmin(user?.email)}
             style={[s.headerChip, iconChips && s.headerChipIcon, meta?.assigned_name ? s.headerChipOn : null]}
             activeOpacity={0.85}
             accessibilityLabel={meta?.assigned_name ? `Assigned to ${meta.assigned_name}. Change` : 'Assign'}
@@ -1494,10 +1517,11 @@ function ThreadView({
               </Text>
             )}
           </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
             onPress={toggleClosed}
             disabled={closing || !meta}
-            style={[s.headerChip, iconChips && s.headerChipIcon, isClosed ? s.headerChipOn : null]}
+            style={[s.headerChip, iconChips && s.headerChipIcon, isClosed ? s.headerChipOn : null, !isClosed && !canClose ? { opacity: 0.45 } : null]}
             activeOpacity={0.85}
             accessibilityLabel={isClosed ? 'Reopen conversation' : 'Close conversation'}
           >
@@ -1520,6 +1544,8 @@ function ThreadView({
         </ChatHeaderBar>
       )}
 
+      {meta ? <DueBanner thread={meta} now={threadNow} /> : null}
+
       {waitingSites.length > 0 ? (
         <Text style={s.waitingLine} numberOfLines={2}>
           Waiting: {waitingSites.map((x) => x.site_name || `Site ${x.site_id}`).join(', ')}
@@ -1532,9 +1558,9 @@ function ThreadView({
           assigning={assigning}
           error={assignError}
           onClose={() => setAssignOpen(false)}
-          onPick={async (userId) => {
+          onPick={async (userId, dueInMinutes) => {
             setAssigning(true);
-            const ok = await assign(userId);
+            const ok = await assign(userId, dueInMinutes);
             setAssigning(false);
             // Only close on success — closing unconditionally here is what
             // made a FAILED assign look identical to a successful one: the
@@ -1714,12 +1740,9 @@ function ThreadView({
 
         <View style={s.composerRow}>
           {voice.recording ? (
-            <VoiceRecordingBar seconds={voice.seconds} cancelling={voice.cancelling} />
+            <VoiceRecordingBar voice={voice} />
           ) : (
           <View style={s.pill}>
-            <TouchableOpacity onPress={pickPhoto} style={s.pillIcon} hitSlop={4}>
-              <ImagePlus size={19} color={palette.muted} />
-            </TouchableOpacity>
             <TextInput
               ref={composerRef}
               value={draft}
@@ -1729,6 +1752,8 @@ function ThreadView({
               style={s.pillInput}
               multiline
             />
+            {/* WhatsApp-style camera: tap = open camera (gallery button inside it), hold = record video straight away. */}
+            <CameraPillButton onPicked={sendMedia} onLibrary={setPhoto} style={s.pillIcon} color={palette.muted} />
           </View>
           )}
           {canSend && !voice.recording ? (
@@ -1737,13 +1762,7 @@ function ThreadView({
             </TouchableOpacity>
           ) : (
             // Nothing to send → the mic: HOLD to record, release to send, slide left to cancel.
-            <View
-              {...voice.panHandlers}
-              accessibilityLabel="Hold to record a voice message"
-              style={[s.sendBtn, { backgroundColor: voice.cancelling ? '#dc2626' : accent, transform: [{ scale: voice.recording ? 1.2 : 1 }] }]}
-            >
-              <Mic size={20} color="#fff" />
-            </View>
+            <VoiceMicButton voice={voice} accent={accent} buttonStyle={s.sendBtn} />
           )}
         </View>
       </View>
@@ -1769,9 +1788,12 @@ function AssignPicker({
   /** The last assign ATTEMPT's error, not the agent list's load error (see loadError below). */
   error: string | null;
   onClose: () => void;
-  onPick: (userId: number | null) => void;
+  onPick: (userId: number | null, dueInMinutes?: number | null) => void;
 }) {
   const { accent } = useAccent();
+  // Step 2: after choosing a person, choose how long they have to resolve it.
+  const [chosen, setChosen] = useState<StaffChatAgent | null>(null);
+  const [timeline, setTimeline] = useState<string>('2h');
   const { data, loading, error: loadError } = useStaffChatAgents();
   const [query, setQuery] = useState('');
   const agents = useMemo(() => filterAgents(data?.agents ?? [], query), [data, query]);
@@ -1788,7 +1810,44 @@ function AssignPicker({
       <Pressable style={[s.sheetBackdrop, { paddingBottom: keyboardHeight }]} onPress={onClose}>
         <Pressable style={[s.sheet, { maxHeight: sheetMaxHeight }]} onPress={(e) => e.stopPropagation()}>
           <View style={s.sheetHandle} />
-          <Text style={s.sheetTitle}>Assign conversation</Text>
+          <Text style={s.sheetTitle}>{chosen ? 'Time to resolve' : 'Assign conversation'}</Text>
+
+          {chosen ? (
+            // ── step 2: the timeline ──
+            <View>
+              <Text style={s.sheetSub}>
+                {chosen.name || chosen.email || 'This person'} will be reminded before it is due and again if it runs late.
+                Others will see if it was not resolved in time.
+              </Text>
+              <View style={s.timelineWrap}>
+                {TIMELINES.map((t) => {
+                  const on = timeline === t.key;
+                  return (
+                    <TouchableOpacity
+                      key={t.key}
+                      onPress={() => setTimeline(t.key)}
+                      activeOpacity={0.85}
+                      style={[s.timelineChip, on && { backgroundColor: accent, borderColor: accent }]}
+                    >
+                      <Text style={[s.timelineChipText, on && { color: '#fff' }]}>{t.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {error ? <Text style={s.sheetError}>{error}</Text> : null}
+              <TouchableOpacity
+                style={[s.timelineGo, { backgroundColor: accent, opacity: assigning ? 0.6 : 1 }]}
+                disabled={assigning}
+                onPress={() => onPick(chosen.id, timelineMinutes(timeline))}
+              >
+                {assigning ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.timelineGoText}>Assign</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={s.sheetCancel} onPress={() => setChosen(null)}>
+                <Text style={s.sheetCancelText}>Back</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+          <>
 
           {/* One scrollable body — results first, search box right after.
               Same mechanism already confirmed to position correctly above
@@ -1817,7 +1876,7 @@ function AssignPicker({
                     key={agent.id}
                     style={s.sheetRow}
                     disabled={assigning}
-                    onPress={() => onPick(agent.id)}
+                    onPress={() => setChosen(agent)}
                   >
                     <View style={{ flex: 1 }}>
                       <Text style={s.sheetRowText} numberOfLines={1}>
@@ -1858,6 +1917,8 @@ function AssignPicker({
               <Text style={s.sheetCancelText}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>
+          </>
+          )}
         </Pressable>
       </Pressable>
     </View>
@@ -1916,9 +1977,22 @@ function VisitTagSummary({ visit, mine }: { visit: ChatVisitTag; mine: boolean }
  */
 function SystemLine({ message }: { message: ChatMessage }) {
   if (!message.body) return null;
+  // The deadline notes written by the server (routes/commercialChatRoutes.js, services/chatDueReminders.js):
+  // "⏰ Overdue — …" / "⏰ Resolved late — …" stand out in red, "✅ Resolved on time — …" in green, so anyone opening
+  // the conversation later can see at once that it was not resolved in the allotted time.
+  const late = message.body.startsWith('⏰');
+  const onTime = message.body.startsWith('✅');
   return (
-    <View style={s.systemLine}>
-      <Text style={s.systemLineText}>{message.body}</Text>
+    <View
+      style={[
+        s.systemLine,
+        late && { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5', borderWidth: 1 },
+        onTime && { backgroundColor: '#DCFCE7', borderColor: '#86EFAC', borderWidth: 1 },
+      ]}
+    >
+      <Text style={[s.systemLineText, late && { color: '#B91C1C', fontWeight: '800' }, onTime && { color: '#166534', fontWeight: '800' }]}>
+        {message.body}
+      </Text>
     </View>
   );
 }
@@ -2167,7 +2241,7 @@ const Bubble = React.memo(function Bubble({
           ]}
         >
           {mine ? <BubbleGradient accent={accent} amber={assigned} /> : null}
-          {!mine && message.sender_name ? <Text style={s.sender}>{message.sender_name}</Text> : null}
+          {!mine && message.sender_name ? <Text style={[s.sender, { color: accent }]}>{message.sender_name}</Text> : null}
 
           {/* the client replied to a specific message (support-chat reply-to) */}
           {message.reply_to ? (
@@ -2208,7 +2282,7 @@ const Bubble = React.memo(function Bubble({
             />
           ) : url ? (
             <TouchableOpacity activeOpacity={0.9} disabled={message.pending || message.failed} onPress={() => onOpenPhoto(message.id)}>
-              <Image source={{ uri: url }} style={[s.photo, photoSize]} contentFit="cover" />
+              <ChatPhoto url={url} width={photoSize.width} height={photoSize.height} uploading={message.pending} />
             </TouchableOpacity>
           ) : null}
 
@@ -2388,12 +2462,12 @@ const TeamBubble = React.memo(function TeamBubble({
         delayLongPress={300}
         style={[
           s.bubble,
-          mine ? { backgroundColor: '#1E92CC', borderBottomRightRadius: 6 } : [s.bubbleTheirs, { borderBottomLeftRadius: 6 }],
+          mine ? { backgroundColor: accent, borderBottomRightRadius: 6 } : [s.bubbleTheirs, { borderBottomLeftRadius: 6 }],
           reactions && reactions.length > 0 ? { marginBottom: 14 } : null,
         ]}
       >
-        {mine ? <BubbleGradient accent={accent} brand /> : null}
-        {!mine && message.sender_name ? <Text style={s.sender}>{message.sender_name}</Text> : null}
+        {mine ? <BubbleGradient accent={accent} /> : null}
+        {!mine && message.sender_name ? <Text style={[s.sender, { color: accent }]}>{message.sender_name}</Text> : null}
 
         {message.reply_to ? (
           <TouchableOpacity
@@ -2421,7 +2495,7 @@ const TeamBubble = React.memo(function TeamBubble({
           />
         ) : url ? (
           <TouchableOpacity activeOpacity={0.9} disabled={message.pending || message.failed} onPress={() => onOpenPhoto(message.id)}>
-            <Image source={{ uri: url }} style={[s.photo, photoSize]} contentFit="cover" />
+            <ChatPhoto url={url} width={photoSize.width} height={photoSize.height} uploading={message.pending} />
           </TouchableOpacity>
         ) : null}
 
@@ -2769,20 +2843,19 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
   // useCallback, not plain functions: TeamBubble is React.memo, and a new
   // function identity per render would defeat it — every keystroke in the
   // composer would re-render every visible bubble.
-  const jumpTo = useCallback(
-    (messageId: number) => {
-      const idx = messages.findIndex((m) => m.id === messageId);
-      if (idx >= 0) listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
-    },
-    [messages],
-  );
-  const openPhoto = useCallback(
-    (messageId: number) => {
-      const idx = photoMedia.findIndex((m) => m.id === messageId);
-      if (idx >= 0) setPhotoViewerIndex(idx);
-    },
-    [photoMedia],
-  );
+  // Stable identities (latest data read through refs) so memoised bubbles don't all re-render on every send.
+  const teamMessagesRef = React.useRef(messages);
+  teamMessagesRef.current = messages;
+  const teamPhotoMediaRef = React.useRef(photoMedia);
+  teamPhotoMediaRef.current = photoMedia;
+  const jumpTo = useCallback((messageId: number) => {
+    const idx = teamMessagesRef.current.findIndex((m) => m.id === messageId);
+    if (idx >= 0) listRef.current?.scrollToIndex({ index: idx, animated: true, viewPosition: 0.5 });
+  }, []);
+  const openPhoto = useCallback((messageId: number) => {
+    const idx = teamPhotoMediaRef.current.findIndex((m) => m.id === messageId);
+    if (idx >= 0) setPhotoViewerIndex(idx);
+  }, []);
 
   // Search-in-chat — WhatsApp's own header search icon. Client-side, over
   // whatever this thread has already loaded (up to 500 messages, see
@@ -2919,7 +2992,6 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
     setMentionQuery(null);
   };
 
-  const pickPhoto = () => promptChatPhotoSource(setPhoto);
 
   const onSend = async () => {
     // Derived from the text itself, so deleting the "@all" un-mentions it.
@@ -2936,13 +3008,14 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
   };
 
-  // Voice note: hold the mic, release to send (src/voiceRecorder.tsx).
-  const voice = useVoiceHold(async (file) => {
+  // Voice note (hold the mic) and recorded video are sent straight away — no Send button.
+  const sendMedia = async (file: ChatPhotoInput) => {
     const ok = await send({ body: '', photo: file, replyTo: replyTo ? replyRef(replyTo) : null });
     if (!ok) return;
     setReplyTo(null);
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
-  });
+  };
+  const voice = useVoiceHold(sendMedia);
 
   const canSend = (draft.trim().length > 0 || !!photo) && !sending;
   const composerClearance = 10 + TAB_BAR_CLEARANCE;
@@ -3232,12 +3305,9 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
 
         <View style={s.composerRow}>
           {voice.recording ? (
-            <VoiceRecordingBar seconds={voice.seconds} cancelling={voice.cancelling} />
+            <VoiceRecordingBar voice={voice} />
           ) : (
           <View style={s.pill}>
-            <TouchableOpacity onPress={pickPhoto} style={s.pillIcon} hitSlop={4}>
-              <ImagePlus size={19} color={palette.muted} />
-            </TouchableOpacity>
             <TextInput
               value={draft}
               onChangeText={onDraftChange}
@@ -3246,6 +3316,8 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
               style={s.pillInput}
               multiline
             />
+            {/* WhatsApp-style camera: tap = open camera (gallery button inside it), hold = record video straight away. */}
+            <CameraPillButton onPicked={sendMedia} onLibrary={setPhoto} style={s.pillIcon} color={palette.muted} />
           </View>
           )}
           {canSend && !voice.recording ? (
@@ -3254,13 +3326,7 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
             </TouchableOpacity>
           ) : (
             // Nothing to send → the mic: HOLD to record, release to send, slide left to cancel.
-            <View
-              {...voice.panHandlers}
-              accessibilityLabel="Hold to record a voice message"
-              style={[s.sendBtn, { backgroundColor: voice.cancelling ? '#dc2626' : accent, transform: [{ scale: voice.recording ? 1.2 : 1 }] }]}
-            >
-              <Mic size={20} color="#fff" />
-            </View>
+            <VoiceMicButton voice={voice} accent={accent} buttonStyle={s.sendBtn} />
           )}
         </View>
       </View>
@@ -3661,141 +3727,6 @@ function GroupInfoView({
 }
 
 type GroupMediaItem = { id: number; url: string | null; senderName: string | null; createdAt: string };
-
-const ZOOM_MIN = 1;
-const ZOOM_MAX = 4;
-
-/**
- * Pinch-to-zoom + pan-when-zoomed + double-tap toggle, WhatsApp's own photo
- * viewer gestures. Deliberately hand-rolled on the classic RNGH ref API +
- * plain `Animated.Value`s (no `Animated.event` offset-extraction, no
- * Reanimated) rather than the newer Gesture/GestureDetector API — see the
- * import comment above for why. `onZoomChange` tells the parent FlatList
- * page whether a pan is currently meaningful: the Pan handler is fully
- * `enabled` only once zoomed in, so at the default 1x a left/right drag
- * falls straight through to the outer FlatList's own page-swipe instead of
- * being (uselessly) claimed here.
- */
-function ZoomableImage({
-  uri,
-  width,
-  height,
-  onZoomChange,
-}: {
-  uri: string;
-  width: number;
-  height: number;
-  onZoomChange?: (zoomed: boolean) => void;
-}) {
-  const scale = React.useRef(new Animated.Value(1)).current;
-  const translateX = React.useRef(new Animated.Value(0)).current;
-  const translateY = React.useRef(new Animated.Value(0)).current;
-  const baseScale = React.useRef(1);
-  const baseTranslate = React.useRef({ x: 0, y: 0 });
-  const [isZoomed, setIsZoomed] = useState(false);
-
-  const pinchRef = React.useRef(null);
-  const panRef = React.useRef(null);
-  const doubleTapRef = React.useRef(null);
-
-  const clamp = (v: number, min: number, max: number) => Math.min(Math.max(v, min), max);
-
-  const setZoomed = (zoomed: boolean) => {
-    setIsZoomed(zoomed);
-    onZoomChange?.(zoomed);
-  };
-
-  const resetToIdentity = (animated: boolean) => {
-    baseScale.current = ZOOM_MIN;
-    baseTranslate.current = { x: 0, y: 0 };
-    setZoomed(false);
-    const duration = animated ? 180 : 0;
-    Animated.parallel([
-      Animated.timing(scale, { toValue: 1, duration, useNativeDriver: true }),
-      Animated.timing(translateX, { toValue: 0, duration, useNativeDriver: true }),
-      Animated.timing(translateY, { toValue: 0, duration, useNativeDriver: true }),
-    ]).start();
-  };
-
-  const onPinchGestureEvent = (event: any) => {
-    scale.setValue(clamp(baseScale.current * event.nativeEvent.scale, ZOOM_MIN, ZOOM_MAX));
-  };
-
-  const onPinchStateChange = (event: any) => {
-    if (event.nativeEvent.oldState === State.ACTIVE) {
-      const next = clamp(baseScale.current * event.nativeEvent.scale, ZOOM_MIN, ZOOM_MAX);
-      if (next <= ZOOM_MIN) {
-        resetToIdentity(true);
-      } else {
-        baseScale.current = next;
-        setZoomed(true);
-      }
-    }
-  };
-
-  const onPanGestureEvent = (event: any) => {
-    if (baseScale.current <= ZOOM_MIN) return;
-    translateX.setValue(baseTranslate.current.x + event.nativeEvent.translationX);
-    translateY.setValue(baseTranslate.current.y + event.nativeEvent.translationY);
-  };
-
-  const onPanStateChange = (event: any) => {
-    if (event.nativeEvent.oldState === State.ACTIVE && baseScale.current > ZOOM_MIN) {
-      baseTranslate.current = {
-        x: baseTranslate.current.x + event.nativeEvent.translationX,
-        y: baseTranslate.current.y + event.nativeEvent.translationY,
-      };
-    }
-  };
-
-  const onDoubleTap = () => {
-    if (baseScale.current > ZOOM_MIN) {
-      resetToIdentity(true);
-      return;
-    }
-    baseScale.current = 2;
-    setZoomed(true);
-    Animated.parallel([
-      Animated.timing(scale, { toValue: 2, duration: 200, useNativeDriver: true }),
-      Animated.timing(translateX, { toValue: 0, duration: 200, useNativeDriver: true }),
-      Animated.timing(translateY, { toValue: 0, duration: 200, useNativeDriver: true }),
-    ]).start();
-  };
-
-  return (
-    <TapGestureHandler ref={doubleTapRef} numberOfTaps={2} onActivated={onDoubleTap}>
-      <Animated.View style={{ width, height, alignItems: 'center', justifyContent: 'center' }}>
-        <PinchGestureHandler
-          ref={pinchRef}
-          simultaneousHandlers={panRef}
-          onGestureEvent={onPinchGestureEvent}
-          onHandlerStateChange={onPinchStateChange}
-        >
-          <Animated.View style={{ width, height }}>
-            <PanGestureHandler
-              ref={panRef}
-              simultaneousHandlers={pinchRef}
-              onGestureEvent={onPanGestureEvent}
-              onHandlerStateChange={onPanStateChange}
-              enabled={isZoomed}
-              minPointers={1}
-              maxPointers={2}
-            >
-              <Animated.View
-                style={[
-                  { width, height, alignItems: 'center', justifyContent: 'center' },
-                  { transform: [{ translateX }, { translateY }, { scale }] },
-                ]}
-              >
-                <Image source={{ uri }} style={{ width, height }} contentFit="contain" />
-              </Animated.View>
-            </PanGestureHandler>
-          </Animated.View>
-        </PinchGestureHandler>
-      </Animated.View>
-    </TapGestureHandler>
-  );
-}
 
 /**
  * Full-screen swipe-through viewer — reused for both GroupInfoView's media
@@ -4210,6 +4141,7 @@ const s = StyleSheet.create({
   },
   sheetRowText: { fontSize: 14, fontWeight: '700', color: palette.ink },
   sheetRowSub: { fontSize: 11.5, color: palette.muted, marginTop: 2 },
+  sheetSub: { fontSize: 13, color: palette.muted, lineHeight: 18, paddingHorizontal: 18, paddingTop: 2 },
   sheetCancel: { marginTop: 14, alignItems: 'center', paddingVertical: 12 },
   sheetCancelText: { fontSize: 14, fontWeight: '700', color: palette.muted },
 
@@ -4429,6 +4361,18 @@ const s = StyleSheet.create({
   failedText: { fontSize: 11.5, fontWeight: '700', color: '#ffd6d6' },
   failedAction: { fontSize: 12, fontWeight: '800', color: '#fff', textDecorationLine: 'underline' },
   waitingLine: { fontSize: 12.5, fontWeight: '800', color: '#b45309', paddingHorizontal: 18, paddingBottom: 8 },
+  timelineWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 18, paddingTop: 10 },
+  timelineChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: palette.border,
+    backgroundColor: palette.surface,
+  },
+  timelineChipText: { fontSize: 13.5, fontWeight: '800', color: palette.inkSoft },
+  timelineGo: { marginHorizontal: 18, marginTop: 16, borderRadius: 14, paddingVertical: 13, alignItems: 'center' },
+  timelineGoText: { color: '#fff', fontSize: 15, fontWeight: '800' },
   rowWaiting: { fontSize: 11.5, fontWeight: '800', color: '#b45309' },
   closedNote: { fontSize: 12, fontWeight: '700', color: palette.muted, textAlign: 'center', marginBottom: 8 },
   sendError: { fontSize: 12, color: palette.danger, marginBottom: 6, paddingHorizontal: 6 },

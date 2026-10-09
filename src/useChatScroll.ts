@@ -53,12 +53,18 @@ export function useChatScroll<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
+  // Is the reader looking at the newest messages? Updated from the scroll events. A size change must only pull
+  // the list to the bottom if so — otherwise a voice note you are playing higher up (or any bubble that
+  // re-measures) threw you to the end and the message slid out of view.
+  const nearBottom = useRef(true);
+
   /** Call from onContentSizeChange. */
   const onContentSizeChange = useCallback(() => {
     if (!enabled) return;
     // For the first moments after opening, ALWAYS chase the end: photos/variable-height bubbles keep
     // growing the list as they lay out, and the newest message must stay in view until it settles.
     const settling = mountedAt.current > 0 && Date.now() - mountedAt.current < 1800;
+    if (!settling && !nearBottom.current) return; // reading older messages — stay where the reader is
     if (!settling && Date.now() < holdUntil.current) return; // older messages are being prepended — stay where the reader is
     listRef.current?.scrollToEnd({ animated: false });
     if (!revealed) {
@@ -74,6 +80,8 @@ export function useChatScroll<T>(
   /** Call from onScroll: near the top → fetch the previous page. */
   const onScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+      nearBottom.current = contentSize.height - (contentOffset.y + layoutMeasurement.height) < 260;
       if (!paging || !revealed || !userDragged.current || !paging.hasMore || paging.loadingOlder) return;
       if (e.nativeEvent.contentOffset.y < 80) {
         holdUntil.current = Date.now() + 1500;

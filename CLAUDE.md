@@ -3,7 +3,7 @@
 This file is a full map of this repository and the backend it talks to, built by reading every
 source file in both. It exists because neither repo had project documentation when this was
 written (2026-09-17). Keep it updated as the code changes — it will go stale otherwise.
-**Last full update: 2026-10-07** — §1–§5 and §7/§9 were refreshed then; start with the 2026-10-07
+**Last full update: 2026-10-07 (end of day: see the "end of day" snapshot at the top of §10 — voice notes, camera, video, chat replies, attendance)** — §1–§5 and §7/§9 were refreshed earlier that day; start with the 2026-10-07
 session snapshot at the top of §10 for what is live, what is pending, and what is uncommitted.
 
 ---
@@ -420,6 +420,191 @@ Newest first. Each entry: what changed, in which file(s)/repo, and deploy status
 backend's deploys are **manual** — WinSCP sync + `pm2 restart` on the VPS, nothing here
 auto-deploys, so "fixed" below means "fixed in this working tree," not "live").
 
+### 2026-10-07 (end of day) — SESSION SNAPSHOT: attendance + chat replies + voice/video follow-ups — read this first tomorrow
+
+**Backend (`D:\github\nova\sowash-backend` — the downloaded LIVE copy, dated 2 Oct, has all the October chat work, so editing it is safe; §7's
+"path no longer exists / stale checkout" note is outdated for this copy). Edited locally, node -c clean; the user uploaded the
+attendance + reply files and ran the reply migration earlier in the day — NOT confirmed for `services/chatMedia.js` / `server.js`:**
+- `routes/customerJobHistoryRoutes.js`: `GET /:schedule_id/detail` now returns `total_panels_cleaned` + `attendance[]` (name, status, in/out
+  times, clock-in/out photo URLs — the user accepted clients seeing the selfies); chat message SELECT/shape carry `reply_to_id`/`reply_to`;
+  `POST /chat/messages` saves `reply_to_id` (validated to the caller's own thread, never a system note).
+- `routes/commercialChatRoutes.js`: same reply columns + `insertAgentMessage({replyToRaw})`. Migration `docs/migrations/2026-10-07-commercial-chat-replies.sql`
+  (`commercial_chat_messages.reply_to_id`) — run by the user. The **site-coordinates patch (weather card) is still NOT applied**.
+- NEW `services/chatMedia.js` + `server.js` hook + all three chat routes use `chatMediaUpload` (see the voice + video entry below). **Still to upload
+  + `pm2 restart`:** `services/chatMedia.js`, `server.js`, `routes/{commercialChatRoutes,staffChatRoutes,customerJobHistoryRoutes}.js` (the last two
+  also carry the attendance/reply work if not already live). Upload order for replies: migration first (done).
+
+**App, voice/video follow-ups (all JS unless noted; typecheck clean at the last run; none seen on a device):**
+- **Mic permission bug (cost a build):** `app.json`'s `expo-image-picker` plugin had `"microphonePermission": false`, which makes the Android build
+  REMOVE `RECORD_AUDIO` (verified by downloading the dev APK: no RECORD_AUDIO in its manifest) — so Settings showed no Microphone and the prompt never
+  appeared. Now a permission string; commit `922d396`. Lesson: after adding a permission plugin, check `npx expo config --type introspect` for
+  RECORD_AUDIO and for any plugin passing `false` for it. Both the voice recorder and camera also show an "Open Settings" alert when Android
+  will no longer ask ("don't ask again"). The generic "could not record" alert now includes the real error text.
+- **Merge-conflict markers in package.json / package-lock.json** (from a `git stash pop`) were found and fixed by restoring both from HEAD
+  (react-native 0.86.3). If a build ever fails on package.json, grep for `<<<<<<<` first.
+- **Voice note = WhatsApp behaviour:** hold the mic → record; release → send; slide LEFT → cancel; slide UP (~70 px, `LOCK_DY`) → LOCK
+  (recording continues hands-free: bar shows trash + timer, the mic becomes Send). `useVoiceHold` returns `locked/sendLocked/cancelLocked`;
+  `VoiceRecordingBar voice={voice}` and `VoiceMicButton` are the shared composer pieces (`src/voiceRecorder.tsx`).
+- **Camera:** a camera icon sits inside the composer pill (right end, shown only while the draft is empty and nothing is attached;
+  `CameraPillButton` in `src/camera-capture.tsx`). TAP → camera opens (tap shutter = photo, hold shutter = video). HOLD the icon → opens already in
+  video mode and records hands-free (tap shutter to stop; a finger can't stay on a button under a Modal on Android). The camera opens in
+  `mode="picture"` and switches to `"video"` only when the shutter is held — `takePictureAsync` failed in video mode ("could not take photo").
+  After a mode switch the code waits for `onCameraReady` or 1.5 s, and records hands-free if the finger already lifted.
+- **Auto-send:** anything captured by the camera (photo OR video) and every voice note is sent immediately, no Send button
+  (`sendMedia` in each composer; `promptChatPhotoSource(onCaptured, onLibraryPicked)` — library photos still ATTACH so a caption can be added).
+- **Video thumbnails:** `ChatAttachment.tsx` generates a first-frame thumbnail on the device (`createVideoPlayer` → `generateThumbnailsAsync`, one at a
+  time, in-memory cache, tile height follows the video's aspect); on failure the plain dark tile with a play icon stays. UNTESTED on a device.
+- **Playback stays in the app:** the video modal's `VideoView` has `fullscreenOptions={{enable:false}}` and PiP off (the built-in fullscreen button
+  opened a separate system screen, which looked like leaving the app). If that wasn't the cause, next step: our own play/pause + progress controls.
+
+**2026-10-08 additions (written, typecheck clean, NOT deployed/tested):**
+- **Client photo viewer:** tapping a photo in the client Support chat now opens `src/components/PhotoViewerModal.tsx` (swipe through the conversation's
+  photos, pinch/double-tap zoom). `ZoomableImage` was moved out of `app/staff/chats.tsx` into `src/components/ZoomableImage.tsx` and is shared.
+- **Client ticks (single / double / blue double) on the client's own messages:** `useChat` now holds `receipts`
+  (`{agent_delivered_at, agent_seen_at}`); `Bubble` draws Check / CheckCheck / blue CheckCheck like the Team chat. Backend:
+  `loadAgentReceipts()` in `customerJobHistoryRoutes.js` adds `receipts` to `GET /chat` and `GET /chat/messages` (seen = `GREATEST(agent_last_read_at,
+  MAX(commercial_chat_thread_reads.last_read_at))`, delivered = new column `commercial_chat_threads.agent_last_delivered_at`); `commercialChatRoutes.js`
+  `GET /threads` (the staff inbox poll) stamps that column for threads with a newer client message. **Run
+  `docs/migrations/2026-10-08-commercial-chat-delivered.sql`, then upload both route files.** Both queries are wrapped, so without the migration the
+  chat still works and just shows single/blue ticks only. Staff-sent messages do not get ticks in the Support thread yet (client side only).
+
+- **Chat send lag pass (not measured on a device):** (a) `jumpTo`/`openPhoto` in the client chat, the staff Support thread and the Team thread were
+  `useCallback`s depending on the message list, so every new/sent message (3 list updates per send) re-rendered EVERY memoised bubble — they now read the
+  latest list through refs and keep a stable identity (rule: never pass a list-dependent callback to `React.memo` bubbles); (b) camera photos are taken at
+  ~1600x1200 (`pickPictureSize` → `CameraView.pictureSize`, ~400 KB instead of ~3 MB) and video uses `videoBitrate` 1.5 Mbps; (c) a video bubble does not
+  generate its thumbnail while it is still uploading. Library photos are still full size (`quality: 0.7` only) — an image-manipulator resize would
+  need a new native module (rebuild).
+
+- **Camera ↔ gallery merged (WhatsApp-style):** the separate "add photo" icon is gone from all three composers; the camera icon is always shown and the camera
+  screen has a gallery button (bottom-left) → photo attaches (`CameraPillButton onLibrary`). **Chat wallpaper** is now `BrandWallpaper` in
+  `ChatBackground.tsx` (logo-colour glows + waves, no tiled doodles; the doodle pattern remains only for the 'onDark'/'plain' tones).
+- **Client "Conversation info":** tap the avatar/name ("General") in the client chat header → `src/components/ChatInfoView.tsx` (full-screen replace, like the
+  staff Group info): shared media grid (photos open the pinch-zoom viewer, videos play in-app, >30-day videos show "Expired"), and who is in the conversation
+  (SoWash Support, you, colleagues who wrote). Derived from the loaded messages — no new endpoint. Not seen on a device.
+
+- **Weather "No location on file" — cause found + fixed locally:** `GET /client/sites` never selected `latitude`/`longitude`
+  (`docs/backend-patches/2026-10-07-client-sites-coordinates.md`). Applied to `D:\github\nova\sowash-backend\routes\customerJobHistoryRoutes.js`
+  (node -c OK); **needs the upload + `pm2 restart`** (no migration). The app side (`extractCoords` in `app/(tabs)/index.tsx`) already reads them. A site whose
+  coordinates were never entered (staff site editor, `routes/commericalSites.js`) will still say "No location on file".
+
+- **Weather forecast (client Overview):** under the current-weather card, a horizontal 7-day strip for the same site coordinates (Open-Meteo `daily=` in
+  the same request: icon, max/min, chance of rain; "Today" highlighted; weekday from the date string parts). Frontend-only (`app/(tabs)/index.tsx`).
+
+- **Voice-note waveform + playback speed:** while recording, `useVoiceHold` samples the mic level (expo-audio `isMeteringEnabled`, every 100 ms) and the file
+  name becomes `voice-<sec>-<32 hex digits>.m4a` (one hex digit per bar, `waveToHex` / `waveFromName` in `src/chat-media.ts`; the server just stores the name, so no schema
+  change; `durationFromName` accepts both forms). `ChatAttachment` draws the bars (played part coloured, tap the wave to seek); notes without a waveform (older ones, or a
+  device that reports no metering) get a stable made-up shape (`fallbackWave`). While a note plays a chip cycles 1x → 1.5x → 2x (`player.setPlaybackRate`, remembered
+  for the next notes). JS only, not seen on a device.
+
+- **Voice-note scrubbing + stable size:** the voice row has a FIXED width (78 % of the screen, 228–300 px) and an always-visible speed chip — a content-sized row changed
+  the bubble's width every time the timer changed, and the chat list nudged itself ("chat moves up while a note plays at 2x"). The wave is now a slider
+  (`Waveform onScrub`, a gesture-handler pan with a 4 px activation distance so it beats the bubble's swipe-to-reply): drag the knob or tap BEFORE playing to
+  pick the start point (`startFrac` → `ActiveVoice initialFraction`, waits for the file to load, seeks, then plays), or while playing to jump (seek once, on release).
+  Not seen on a device; if dragging the wave also starts a reply, give the scrub handler `simultaneousHandlers`/`waitFor` against the bubble pan.
+
+- **Scrub smoothness + "chat jumps when I play a note":** (a) the wave's drag no longer goes through React state — the pan's `x` feeds an `Animated.Value` with the native
+  driver and the played bars/knob are native transforms (a clip window), the parent is told ~11×/s + once at the end (`Waveform` in `ChatAttachment.tsx`); starting
+  playback from a picked spot plays MUTED, seeks once it is really playing, verifies, then unmutes (a seek issued before that was ignored → played from 0:00);
+  (b) ROOT CAUSE of the jump: `useChatScroll.onContentSizeChange` scrolled to the end on ANY content-size change; it now only does so while the reader is within
+  ~260 px of the bottom (`nearBottom`, set from `onScroll`) or during the first 1.8 s — and the client chat list now wires `onScroll`/`onScrollBeginDrag` too.
+
+- **Gotcha (fixed):** a NATIVE `Animated.event` used as a react-native-gesture-handler `onGestureEvent` made Fabric throw "Expected `onGestureHandlerEvent` listener to be a
+  function, instead got a value of `object` type" on every move while dragging the voice wave (removing its `listener` option was not enough). The wave's pan now uses a PLAIN
+  function that calls `dragX.setValue(x)` (no React state per move) and takes the exact release point from the END state event. If this error ever shows up again, suspect the
+  bubbles' swipe-to-reply handler (`Animated.event(..., {useNativeDriver:true})` in `support.tsx` / `chats.tsx`) and convert it to a plain function too.
+
+- **Voice note playback smoothness + responsive width:** the Animated graph of `Waveform` (shown/maskX/innerX/knobX) is `useMemo`'d per width — it used to be rebuilt on every
+  render (status updates ~2–5×/s), creating native nodes each time (the "laggy while playing" feel); the bars are a `React.memo` `BarsRow`; the playhead glides over 450 ms between
+  reports. Row width = `clamp(screenW*0.8 - 54, 172, 320)` (bubble is 80 % of the row minus padding) and the wave drops to `floor(width/4.5)` bars when narrow
+  (`resampleBars`). Not measured on a device.
+
+- **Loading states in chat (same idea as the completed-job report):** photos in bubbles are now `ChatPhoto` (`ChatAttachment.tsx`) = the report's `PhotoThumb` (spinner while loading,
+  tap-to-retry on failure) plus a dimmed spinner while the photo is still uploading; a video tile shows a small spinner while its thumbnail is being made (and the play spinner while
+  uploading); the voice play button shows a spinner while the file loads / the jump to the picked spot is pending. Faster start from a picked spot: instead of a fixed 350 ms wait the
+  muted player is polled every 60 ms and unmuted as soon as it is really at the spot (one retry after 300 ms, give up after 1.5 s). The remaining delay is the file download itself —
+  next step if it still feels slow: create the player as soon as the user touches the wave (pre-load), not on Play.
+
+- **Client chat opens instantly + search + jump-to-newest:** `useChat` keeps the last copy of the conversation in `dataCache` (`client-chat`; cleared on sign-in/out like all cached data), so
+  re-opening General shows the messages at once and refreshes underneath; the very first open (nothing cached) shows the real screen with `ChatSkeleton` placeholder bubbles instead of a
+  full-screen spinner. Header gets a search icon (search bar with `n/N`, up/down, matches highlighted in the bubbles via `Highlighted`; Android back closes it first). A round down-arrow
+  (`jumpBtn`) appears once scrolled >380 px from the bottom, with a count of messages that arrived meanwhile. Voice notes are pre-downloaded (`expo-audio preload`, last 12 kept) the moment
+  the user touches the wave/play button. Client chat only — the staff Support/Team threads still have a plain spinner and no jump button.
+
+- **Staff chat colours match the client chat:** Team-chat own bubbles are now the user's accent gradient (they were the fixed logo blue `#0E78B5 → #2AA9E3`, `BubbleGradient brand`, which
+  is now unused), and sender names above others' bubbles use the accent colour, as on the client side. The yellow "assigned" stretch in the Support thread is unchanged on purpose.
+
+- **Staff chats audit (voice / video / photo):** checked end to end — the staff Support thread and Team DMs/groups use the same composer pieces (`VoiceMicButton`, `CameraPillButton` + gallery,
+  `sendMedia`), the same bubbles (`ChatAttachment`, `ChatPhoto`), the same upload field (`photo`) and the shared `chatMediaUpload` on `staffChatRoutes.js` / `commercialChatRoutes.js`
+  (files land in `uploads/staff-chat` / `uploads/commercial-chat`, both swept by the 30-day video cleanup). Fixed: reaction pushes said "📷 Photo" for voice/video (`labelForUrl` in
+  `services/chatMedia.js`, used by all three routes → re-upload `chatMedia.js` + the three route files). Known cosmetic gap: a reply quote of a voice/video message still reads "Photo".
+  Not yet exercised on a device for the staff side.
+
+- **"AudioRecorder.prepareToRecordAsync has been rejected":** `useVoiceHold` now calls `prepareWithFallback` (`src/voiceRecorder.tsx`): normal settings → without level metering → plain mono 22 kHz AAC
+  (`.m4a`), resetting the recorder and waiting 250 ms between attempts; each failure is logged as `[voice] prepareToRecordAsync attempt N failed:` with the native reason. The ORIGINAL reason was
+  not captured (the pasted text was cut off) — if it still fails, read that log line (likely: mic held by the camera/another app, a missing RECORD_AUDIO permission on an OLD build, or Android
+  refusing a background start).
+
+- **Assignment deadlines for support conversations (written, typecheck + `node -c` clean, NOT deployed/tested):** when staff assign a client conversation they now pick a TIMELINE
+  (15 min / 30 min / 1 h / 2 h / 4 h / end of day / no deadline) in a second step of the assign sheet (`AssignPicker` in `app/staff/chats.tsx`; helpers + badges in `src/chatDue.tsx`).
+  Backend: migration `docs/migrations/2026-10-08-commercial-chat-due.sql` adds `assigned_at, assigned_due_at, due_soon_notified_at, overdue_notified_at, overdue_reminder_sent_at,
+  overdue_reminder_count, closed_at, resolved_late` to `commercial_chat_threads`; `PATCH /commercial-chat/threads/:id` accepts `due_in_minutes` (5 min–14 days, deadline computed on the
+  server) with `assigned_user_id`; the assignment note gets "— to be resolved within 2h (by 4:30 PM)" appended AFTER "assigned this conversation to <name>" (the staff app's yellow-stretch
+  logic and the client ring status match on the fixed parts of the wording); closing sets `closed_at` and `resolved_late` and adds a SEPARATE note "⏰ Resolved late — …" or
+  "✅ Resolved on time — …" (never part of the "… closed this conversation" note); reopening or unassigning clears the deadline. NEW `services/chatDueReminders.js` (started from `server.js`,
+  every 60 s): 15 min before the deadline (only for timelines > 30 min) → push to the assignee; first time overdue → push to the assignee AND org admins + a red system note
+  "⏰ Overdue — … had until 4:30 PM and this is not resolved yet" in the thread; then every 30 min (max 8) → "Still unresolved — N overdue" to the assignee, until it is closed.
+  App: inbox rows show a badge (Due in 40m · 4:30 PM / Overdue by 1h 10m / Resolved late (1h over) / Resolved on time), the thread has a banner with the same, and the ⏰/✅ system notes are
+  drawn red/green. Push taps of type `commercial_chat_*` open the Chats tab. The web console's assign (no `due_in_minutes`) still works = no deadline. Deploy: run the migration, upload
+  `routes/commercialChatRoutes.js`, `services/chatDueReminders.js`, `server.js`, `pm2 restart`.
+
+- **"Update available" popup for Play Store releases (written, typecheck + `node -c` clean, not run on a device):** `src/appUpdate.tsx` (`AppUpdateHost`, mounted in `app/_layout.tsx`) asks the public
+  `GET /api/app-version/commercial` (`routes/appVersionRoutes.js`, mounted in `server.js`; data in table `app_release_info`, migration `docs/migrations/2026-10-09-app-release-info.sql`) which version is
+  newest and which is the oldest allowed, and compares with the running `app.json` "version" (`expo-constants`). Older than `latest_version` → "Update available" [Update on Google Play] [Later] (Later hides it
+  for 24 h per version); older than `min_supported_version` → "Update required", blocking (no Later, Android back does nothing). The button opens `market://details?id=com.sowash.commercial` (web URL fallback).
+  Checked on launch and when the app returns to the foreground (max every 6 h); Android only; any failure = no popup. **Release routine:** (1) bump `version` in `app.json` (EAS auto-increments the Play
+  versionCode for the `production` profile), (2) `eas build --platform android --profile production` (AAB for Play) and upload it to Play, (3) once it is live on Play:
+  `UPDATE app_release_info SET latest_version='1.0.1', update_message='what is new', updated_at=NOW() WHERE app='commercial';` (add `min_supported_version='1.0.1'` to force). No server deploy needed.
+  First-time setup: run the migration + upload `routes/appVersionRoutes.js` and `server.js`. A user can only get the popup if their installed version is OLDER than the announced one, so the very first Play
+  release (1.0.0) shows nothing; it starts working from the second release.
+- **Who may CLOSE an assigned conversation:** `PATCH /commercial-chat/threads/:id` now returns 403 ("Only the assigned person or an admin can close this conversation.") when someone other than the assignee or an
+  admin (`users."Type"` admin / ci_admin) tries to close a conversation that is ASSIGNED; unassigned ones can still be closed by any support user, and reopening is unrestricted (replying to a closed one reopens it
+  anyway). App (`app/staff/chats.tsx`): the Close chip is dimmed for others and tapping it explains who can close it. Needs `routes/commercialChatRoutes.js` uploaded + `pm2 restart`.
+- **30-day videos are now ARCHIVED, not deleted (2026-10-09):** `services/chatMedia.js` `sweepOnce()` moves every chat video older than 30 days out of `uploads/{commercial-chat,staff-chat}` into
+  `<backend>/archive/chat-videos/<YYYY-MM>/` (deliberately OUTSIDE the publicly served `uploads/`, because the names are readable) with a name built from the message row: client chat from the client =
+  `<Client> - <person> - <Site if it was a ring about a site> - <YYYY-MM-DD HH-mm>`, from SoWash staff = `SoWash <staff> to <Client> - <Site> - <date time>`, staff group = `<person> - <Group> - <date time>`,
+  staff DM = `<person> - DM <A & B> - <date time>`, no message row = `Unknown - <original name> - <date time>` (times in Pakistan time; duplicates get ` (2)`). Nothing in `archive/` is ever deleted
+  automatically: download it with WinSCP, then delete by hand. The apps still show "Video expired" after 30 days. `CHAT_VIDEO_RETENTION_DAYS` env var overrides 30 (use 0 to test). Verified with an isolated test
+  (5 videos archived, a fresh video and a photo left alone, second pass idempotent; a video whose DB lookup FAILS is skipped and retried next sweep instead of being archived as "Unknown" — frequent server
+  restarts are fine: age comes from the file's mtime, and every start also runs a sweep after 60 s). Deploy: upload `services/chatMedia.js` + `pm2 restart`.
+- **Stale-deadline bug fixed:** when a CLOSED conversation is reopened by a client message (`customerJobHistoryRoutes.js` POST /chat/messages) or an agent reply (`commercialChatRoutes.js` `insertAgentMessage`) the
+  deadline state (`assigned_due_at`, notified/reminder columns, `closed_at`, `resolved_late`) is now cleared in the same UPDATE (CASE WHEN status='closed'), so a returned ring does not show a stale "Overdue" nor re-fire
+  the overdue reminders. Who closes (assignee or admin) does not change what is shown: "Resolved on time/late" is based on the deadline only.
+- **FINAL RULE (supersedes the type-based wording below): admins are two ACCOUNTS by e-mail — `ciadmin@sowash.pk` and `superadmin@sowash.pk`** (`CHAT_ADMIN_EMAILS` in `routes/commercialChatRoutes.js`, enforced;
+  mirrored in `src/chatAdmins.ts` for what the app shows). Only they assign/reassign/unassign. A conversation can be CLOSED only by the person it is assigned to or by an admin (an unassigned one only by an admin);
+  reopening is unrestricted. Reason: `users."Type"` is useless for this — 10 accounts are `ci_admin` (e.g. moinz@sowash.pk) and 4 are `Admin`. To add/remove an admin edit BOTH lists. The type-based text below is history.
+- **Assigning is ADMIN-ONLY (2026-10-09, first version, type-based):** `commercialChatRoutes.js` defines `CHAT_ADMIN_TYPES = ['admin','ci_admin']` / `isChatAdmin()`; `PATCH /threads/:id` with `assigned_user_id` (assign, reassign, unassign) returns 403
+  "Only an admin can assign this conversation." for anyone else, and closing an assigned conversation needs the assignee or an admin (same helper). App: the Assign chip is shown/tappable only for admins (others see a
+  read-only "Assigned to X" chip, none when unassigned). **If a user who should NOT be an admin can still assign/close, check his `users."Type"` — an "operations manager" may have Type `admin`.** To narrow
+  "admin" to ci_admin only, change `CHAT_ADMIN_TYPES` (and `isAdminRole` in `app/staff/chats.tsx`, which also drives the yellow admin view).
+- **UPDATE MECHANISM CHANGED (supersedes the "release routine" above — newest): Google Play In-App Updates, automatic.** `src/appUpdate.tsx` now uses `expo-in-app-updates` (new NATIVE module → needs a new build,
+  ideally before the first Play release). On every app open / return to foreground (max every 10 min) it asks Google Play whether a newer version exists FOR THIS PHONE (`checkForUpdate`); if so it starts an
+  IMMEDIATE update (`startUpdate(true)`: Google's full-screen update, installs in place, app restarts; an interrupted one is resumed via `updateInProgress`). If the user backs out (`updateCancelled`) or it cannot start,
+  our blocking "Time to update!" card appears (no dismiss, back does nothing) with UPDATE NOW (retries Google's flow, falls back to the Play Store listing). Correct for staged rollouts; NO SQL needed for normal
+  releases. Only works for an app installed from Play (dev build/side-loaded APK → "no update", harmless; skipped in `__DEV__`; module loaded in try/catch so an older build can't crash). The server table
+  `app_release_info` is now only an EMERGENCY BRAKE: raise `min_supported_version` to block versions that must not be used (the same blocking card); `latest_version`/`update_message` are no longer needed for
+  the popup. **Release routine now:** bump `version` in `app.json` → `eas build --platform android --profile production` → upload the AAB to Play → publish. That's all (Play's versionCode is auto-incremented
+  by EAS). Test in-app updates with Play Console "Internal app sharing"/internal testing track (not possible on dev builds). The older server-driven "optional popup + Later" was removed.
+- **Popup design (restyled to match the field-officer app's):** the FO app (`sowash-fo-app/app/index.tsx`) uses `react-native-version-check` (reads the public Google Play page for the newest version,
+  blocking "Time to Update!" popup, no Later). We kept our server-controlled check (no scraping of Google's page, staged-rollout safe, optional vs required) but the popup now has the FO look: gradient
+  rocket icon floating over the card, version pill, generic highlights (Faster performance / Bug fixes / New features) when the release has no message, big "UPDATE NOW →" button, "Remind me later" (optional only).
+- **Splash screen:** `assets/splash-icon.png` (was Expo's default blue chevron) is now the SC logo (same image as `assets/icon-alt-white.png`), splash `backgroundColor` `#FFFFFF`, `imageWidth` 380 (`app.json`).
+  Native → needs the new build to show.
+
+**Tomorrow:** (1) upload the backend files above + `pm2 restart`, then test voice/photo/video in all three chats both ways; (2) the user builds a new
+dev build only if native config changes again (the last build, from commit `922d396`, should already contain mic + camera + audio + video);
+(3) decide: photos from the library sending immediately too? (4) apply the site-coordinates patch; (5) confirm the 30-day video cleanup removed
+nothing early (look for the `🧹 chat video cleanup` log line) and that an old video shows "Video expired".
+
 ### 2026-10-07 (voice + video) — Voice notes and hold-to-record video in all three chats (written, typecheck + Android bundle OK, NOT run on a device; needs a NEW EAS build + backend deploy)
 
 - **Voice note:** the send button becomes a mic when there is nothing to send — HOLD to record, release to send, slide left to cancel
@@ -435,8 +620,8 @@ auto-deploys, so "fixed" below means "fixed in this working tree," not "live").
   (`videoExpired`). Inbox previews now say "🎤 Voice message" / "🎥 Video". No migration.
 - **Deploy:** upload `services/chatMedia.js` (new), `server.js`, `routes/{commercialChatRoutes,staffChatRoutes,customerJobHistoryRoutes}.js`, `pm2 restart`.
   App: new native modules (expo-audio, expo-camera, expo-video) + mic/camera permissions in app.json → **new EAS build required**.
-  Unverified risks: `takePictureAsync` while the camera is in `mode="video"` (used so tap-photo and hold-video share one session);
-  PanResponder hold on the mic inside a scroll/keyboard screen; Android permission prompt eating the first press.
+  (Superseded by the end-of-day snapshot above: photo mode now switches to video only on hold, because `takePictureAsync` failed in video mode.)
+  Still unverified: PanResponder hold/lock on the mic inside a scroll/keyboard screen, and video thumbnails.
 
 ### 2026-10-07 — SESSION SNAPSHOT: everything done 2026-10-05 → 10-07, and what is still open (read first)
 

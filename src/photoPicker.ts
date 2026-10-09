@@ -43,18 +43,23 @@ export async function pickChatPhoto(source: 'camera' | 'library'): Promise<ChatP
 }
 
 /** The "take photo / choose from library" prompt every composer's photo-attach button shows. */
-export function promptChatPhotoSource(onPicked: (photo: ChatPhotoInput) => void): void {
+export function promptChatPhotoSource(
+  /** Receives what the camera captured (the composers send it straight away, like WhatsApp). */
+  onCaptured: (photo: ChatPhotoInput) => void,
+  /** Receives a photo chosen from the library (the composers attach it, so a caption can be added). */
+  onLibraryPicked: (photo: ChatPhotoInput) => void = onCaptured,
+): void {
   Alert.alert('Add a photo or video', undefined, [
     {
       // WhatsApp-style camera: tap = photo, hold = video (src/camera-capture.tsx).
       text: 'Camera (tap: photo, hold: video)',
-      onPress: () => openCameraCapture(onPicked),
+      onPress: () => openCameraCapture(onCaptured),
     },
     {
       text: 'Choose Photo from Library',
       onPress: async () => {
         const photo = await pickChatPhoto('library');
-        if (photo) onPicked(photo);
+        if (photo) onLibraryPicked(photo);
       },
     },
     { text: 'Cancel', style: 'cancel' },

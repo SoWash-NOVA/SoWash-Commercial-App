@@ -101,12 +101,24 @@ import PageHeader from '../../src/components/PageHeader';
  * Weather — Open-Meteo, live. WMO weather_code -> icon + label, per
  * https://open-meteo.com/en/docs (current-weather section).
  * ------------------------------------------------------------------ */
+type WeatherDay = {
+  /** "YYYY-MM-DD" in the SITE's own timezone (Open-Meteo `timezone=auto`). */
+  date: string;
+  code: number;
+  maxC: number;
+  minC: number;
+  /** Chance of rain that day, 0–100 (null if the service didn't send it). */
+  rainPct: number | null;
+};
+
 type WeatherNow = {
   tempC: number;
   feelsLikeC: number;
   humidity: number;
   windKph: number;
   code: number;
+  /** The next days at the site (today first). */
+  daily: WeatherDay[];
 };
 
 function weatherMeta(code: number): { Icon: typeof Sun; label: string } {
@@ -169,18 +181,31 @@ function useSiteWeather(coords: { lat: number; lng: number } | null) {
       const url =
         `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}` +
         `&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code` +
-        `&timezone=auto`;
+        // The forecast for the same coordinates: next 7 days (today first), in the site's own timezone.
+        `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` +
+        `&forecast_days=7&timezone=auto`;
       const res = await fetch(url);
       if (!res.ok) throw new Error('Weather service unavailable');
       const json = await res.json();
       const c = json?.current;
       if (!c) throw new Error('Weather service unavailable');
+      const d = json?.daily;
+      const daily: WeatherDay[] = Array.isArray(d?.time)
+        ? d.time.map((date: string, i: number) => ({
+            date,
+            code: d.weather_code?.[i] ?? 0,
+            maxC: d.temperature_2m_max?.[i],
+            minC: d.temperature_2m_min?.[i],
+            rainPct: d.precipitation_probability_max?.[i] ?? null,
+          }))
+        : [];
       setData({
         tempC: c.temperature_2m,
         feelsLikeC: c.apparent_temperature,
         humidity: c.relative_humidity_2m,
         windKph: c.wind_speed_10m,
         code: c.weather_code,
+        daily: daily.filter((x) => Number.isFinite(x.maxC) && Number.isFinite(x.minC)),
       });
     } catch {
       setError('Could not load weather');
@@ -633,6 +658,7 @@ function WeatherCard({
   const { Icon, label } = weatherMeta(data.code);
 
   return (
+    <View style={{ gap: 10 }}>
     <LinearGradient colors={[tc('#FFFFFF'), tc('#FFFFFF')]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.weatherCard}>
       <LinearGradient colors={[tc(C.blueSoft), tc(C.blueSoft)]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.weatherIcon}>
         <Icon size={26} color={C.blue} />
@@ -658,7 +684,41 @@ function WeatherCard({
         </View>
       </View>
     </LinearGradient>
+
+    {/* Forecast for the same site: the next days, with the chance of rain (useful for planning a clean). */}
+    {data.daily.length > 1 ? (
+      <View style={s.forecastCard}>
+        <Text style={s.forecastTitle}>{siteName ? `Forecast · ${siteName}` : 'Forecast'}</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.forecastRow}>
+          {data.daily.map((day, i) => {
+            const DayIcon = weatherMeta(day.code).Icon;
+            return (
+              <View key={day.date} style={[s.forecastDay, i === 0 && s.forecastDayToday]}>
+                <Text style={s.forecastDayName}>{i === 0 ? 'Today' : weekdayShort(day.date)}</Text>
+                <DayIcon size={22} color={C.blue} />
+                <Text style={s.forecastMax}>{Math.round(day.maxC)}°</Text>
+                <Text style={s.forecastMin}>{Math.round(day.minC)}°</Text>
+                <View style={s.forecastRain}>
+                  <Droplets size={10} color={day.rainPct != null && day.rainPct >= 40 ? C.blue : palette.mutedLight} />
+                  <Text style={[s.forecastRainText, day.rainPct != null && day.rainPct >= 40 && { color: C.blue }]}>
+                    {day.rainPct != null ? `${Math.round(day.rainPct)}%` : '–'}
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </View>
+    ) : null}
+    </View>
   );
+}
+
+/** "2026-10-09" → "Fri", from the string parts (never through a UTC-parsed Date — see CLAUDE.md §3). */
+function weekdayShort(value: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!m) return '';
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getDay()];
 }
 
 function StatTile({
@@ -891,6 +951,32 @@ const s = StyleSheet.create({
     ...CARD_SHADOW,
   },
   weatherEmptyText: { flexShrink: 1, fontSize: 12.5, fontWeight: '700', color: palette.muted, lineHeight: 17 },
+
+  // forecast strip under the current weather
+  forecastCard: {
+    backgroundColor: '#fff',
+    borderRadius: 22,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#EDF2F6',
+    ...CARD_SHADOW,
+  },
+  forecastTitle: { fontSize: 12, fontWeight: '800', color: palette.muted, paddingHorizontal: 16, marginBottom: 8 },
+  forecastRow: { paddingHorizontal: 12, gap: 8 },
+  forecastDay: {
+    width: 64,
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#F4F9FC',
+  },
+  forecastDayToday: { backgroundColor: '#E3F2FB' },
+  forecastDayName: { fontSize: 11.5, fontWeight: '800', color: palette.inkSoft },
+  forecastMax: { fontSize: 15, fontWeight: '900', color: palette.ink },
+  forecastMin: { fontSize: 12, fontWeight: '700', color: palette.mutedLight },
+  forecastRain: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  forecastRainText: { fontSize: 10.5, fontWeight: '800', color: palette.mutedLight },
 
   // progress + tiles
   progressCard: { backgroundColor: '#fff', borderRadius: 22, padding: 16, marginBottom: 12, ...CARD_SHADOW },

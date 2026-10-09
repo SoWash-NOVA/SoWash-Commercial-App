@@ -9,6 +9,7 @@ import { DarkTheme, DefaultTheme, Stack, ThemeProvider as NavThemeProvider, useR
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { CameraCaptureHost } from '../src/camera-capture';
+import AppUpdateHost from '../src/appUpdate';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { ThemeProvider } from '../src/theme-context';
 import { AuthProvider, useAuth } from '../src/auth/AuthContext';
@@ -205,6 +206,8 @@ export default function RootLayout() {
                       <TopInsetFill />
                       {/* In-chat camera (tap = photo, hold = video); opened by src/photoPicker.ts. */}
                       <CameraCaptureHost />
+                      {/* "Update available" / "Update required" popup - asks the server which version is newest on Google Play. */}
+                      <AppUpdateHost />
                     </Shell>
                   </TopInsetProvider>
                 </NavTheme>
