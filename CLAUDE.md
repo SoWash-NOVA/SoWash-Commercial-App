@@ -452,6 +452,7 @@ Full history: **`docs/CHANGELOG.md`** (append new entries there). Snapshot as of
   `routes/{commercialChatRoutes,staffChatRoutes,customerJobHistoryRoutes}.js`.
 - **Migrations that may still need running** (in `docs/migrations/`): `2026-10-08-commercial-chat-delivered.sql`,
   `2026-10-08-commercial-chat-due.sql`, `2026-10-09-app-release-info.sql`. Run BEFORE uploading the routes.
+- **Staff Phone Book (2026-10-20, NOT deployed):** migration `2026-10-20-staff-phonebook.sql`, upload `routes/phonebookRoutes.js` + `server.js`, new EAS build (expo-contacts). Rules in `routes/phonebookRoutes.js` header; `phoneKey()` is mirrored in `src/phonebook.ts` — keep in step. Play needs a contacts permission declaration.
 - **Weather "No location on file":** needs the site-coordinates change in `customerJobHistoryRoutes.js` uploaded, and
   coordinates entered for the site in the staff site editor.
 - **Features built but unverified on a device:** voice notes (hold/lock/waveform/speed), in-app camera + gallery,

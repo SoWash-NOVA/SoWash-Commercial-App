@@ -25,7 +25,7 @@ import { useAccent } from '../src/theme-context';
 import { PRIVACY_EMAIL } from '../src/contact';
 import PageHeader from '../src/components/PageHeader';
 
-const LAST_UPDATED = '10 August 2026';
+const LAST_UPDATED = '20 October 2026';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -109,13 +109,27 @@ export default function PrivacyScreen() {
             no way to track where you or your phone are.
           </Bullet>
           <Bullet>
-            We never access your camera, contacts, calendar, microphone, or call history. The app
-            declares no camera or microphone permission at all.
+            We never access your calendar or call history. The camera and microphone are used only
+            when you choose to take a photo or video or record a voice message in a chat. Your
+            contacts are read only when a SoWash staff member taps Back up or Restore in the
+            staff Phone Book — client accounts never use or see this.
           </Bullet>
           <Bullet>No advertising identifiers, no third-party analytics, no cross-app tracking.</Bullet>
           <Bullet>
             We do not send your data to any outside service other than the one named below.
           </Bullet>
+        </Section>
+
+        <Section title="Staff phone book">
+          <P>
+            This applies to SoWash office staff using the company phone. If a staff member taps
+            Back up in the Phone Book, the names, phone numbers, email addresses and company details
+            of the contacts on that phone are saved on our server, private to that staff
+            member&apos;s account, so they can be restored on a replacement phone. A contact is
+            never removed from the backup just because it is missing from the phone. The staff
+            member can remove any contact from their backup in the app, and can ask SoWash to
+            delete all of it.
+          </P>
         </Section>
 
         <Section title="How we use it">

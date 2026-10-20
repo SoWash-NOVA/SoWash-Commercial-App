@@ -74,6 +74,12 @@
       ],
       "expo-video",
       [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow $(PRODUCT_NAME) to read your contacts to back them up, and to add them back when you restore on a new phone."
+        }
+      ],
+      [
         "./plugins/withFcmNotification",
         {
           "icon": "./assets/notification-icon.png",

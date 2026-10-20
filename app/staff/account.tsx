@@ -6,7 +6,8 @@
 
 import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Alert, StyleSheet } from 'react-native';
-import { LogOut, Mail, Shield } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
+import { BookUser, ChevronRight, LogOut, Mail, Shield } from 'lucide-react-native';
 import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useAuth, initialsOf } from '../../src/auth/AuthContext';
@@ -25,6 +26,7 @@ function formatRole(role: string | null | undefined): string {
 export default function StaffAccountScreen() {
   const { accent } = useAccent();
   const { user, signOut } = useAuth();
+  const router = useRouter();
 
   const confirmSignOut = () => {
     Alert.alert('Sign out', 'You will need your email and password to sign back in.', [
@@ -55,6 +57,21 @@ export default function StaffAccountScreen() {
             <Text style={local.rowText}>{user?.email || '—'}</Text>
           </View>
         </View>
+
+        <TouchableOpacity
+          style={[local.card, local.linkRow]}
+          activeOpacity={0.85}
+          onPress={() => router.push('/phonebook' as never)}
+        >
+          <View style={[local.linkIcon, { backgroundColor: `${accent}14` }]}>
+            <BookUser size={18} color={accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={local.linkTitle}>Phone Book</Text>
+            <Text style={local.linkSub}>Back up and restore your phone’s contacts</Text>
+          </View>
+          <ChevronRight size={18} color={palette.mutedLight} />
+        </TouchableOpacity>
 
         <AppearanceCard style={{ marginBottom: 20 }} />
 
@@ -88,6 +105,10 @@ const local = StyleSheet.create({
     marginBottom: 20,
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  linkIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  linkTitle: { fontSize: 14.5, fontWeight: '800', color: palette.ink },
+  linkSub: { fontSize: 12, fontWeight: '600', color: palette.muted, marginTop: 2 },
   rowText: { fontSize: 14, fontWeight: '600', color: palette.ink },
   signOutBtn: {
     flexDirection: 'row',

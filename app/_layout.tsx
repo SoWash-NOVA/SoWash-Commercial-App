@@ -43,6 +43,13 @@ const PUBLIC_SEGMENTS = ['login'];
  */
 const STAFF_ROOT = '/staff';
 
+/**
+ * Staff-only routes that live OUTSIDE app/staff/* because they are full-screen
+ * stack pages, not tabs (they must not appear in the staff tab bar). Without
+ * listing them here the staff guard below would bounce them back to '/staff'.
+ */
+const STAFF_STACK_SEGMENTS = ['phonebook'];
+
 function RootNavigator() {
   const { status, appRole } = useAuth();
   const segments = useSegments();
@@ -65,7 +72,8 @@ function RootNavigator() {
     if (status === 'loading') return;
 
     const onPublicRoute = PUBLIC_SEGMENTS.includes(segments[0] as string);
-    const onStaffRoute = segments[0] === 'staff';
+    const onStaffStackRoute = STAFF_STACK_SEGMENTS.includes(segments[0] as string);
+    const onStaffRoute = segments[0] === 'staff' || onStaffStackRoute;
 
     if (status === 'signedOut') {
       if (!onPublicRoute) router.replace('/login');
