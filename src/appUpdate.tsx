@@ -26,7 +26,7 @@ import { SERVER_BASE } from './api/client';
 import { HEADER_GRADIENT } from './brand';
 import { palette } from './theme';
 
-const PACKAGE_ID = 'com.sowash.commercial';
+const PACKAGE_ID = 'com.sowash.commercial'; // = app.json android.package = the Play Console listing's package
 const STORE_MARKET_URL = `market://details?id=${PACKAGE_ID}`;
 const STORE_WEB_URL = `https://play.google.com/store/apps/details?id=${PACKAGE_ID}`;
 const CHECK_EVERY_MS = 10 * 60 * 1000;
