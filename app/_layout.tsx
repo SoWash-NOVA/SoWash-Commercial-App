@@ -48,7 +48,7 @@ const STAFF_ROOT = '/staff';
  * stack pages, not tabs (they must not appear in the staff tab bar). Without
  * listing them here the staff guard below would bounce them back to '/staff'.
  */
-const STAFF_STACK_SEGMENTS = ['phonebook'];
+const STAFF_STACK_SEGMENTS = ['phonebook', 'files'];
 
 function RootNavigator() {
   const { status, appRole } = useAuth();

@@ -501,6 +501,8 @@ export function notificationTarget(n: {
   // A chat reply opens the conversation, not a visit. There is one thread per
   // account, so the thread id is not needed in the route.
   if (n.type === 'chat_reply') return '/support';
+  // Phone Book restore requests / approvals / rejections open the Phone Book.
+  if (typeof n.type === 'string' && n.type.startsWith('phonebook_')) return '/phonebook';
   // Staff pushes about a support conversation (assigned / due soon / overdue) open the Chats tab.
   if (typeof n.type === 'string' && n.type.startsWith('commercial_chat_')) return '/staff/chats';
   // Internal staff chat lives inside app/staff/chats.tsx as a second section,
@@ -2297,6 +2299,27 @@ export function useTeamConversation(conversationId: number | null, myUserId: num
     };
   }, [conversationId]);
 
+  /** Send a library file (no upload — the message points at the stored file). Resolves to an error text, or null on success. */
+  const sendFile = useCallback(
+    async (fileId: number, caption?: string): Promise<string | null> => {
+      if (!conversationId) return 'No conversation open.';
+      try {
+        const { data } = await api.post<TeamMessageResponse>(`staff-chat/conversations/${conversationId}/messages`, {
+          file_id: fileId,
+          body: caption || undefined,
+        });
+        if (data?.message) {
+          setMessages((prev) => (prev.some((m) => m.id === data.message.id) ? prev : [...prev, data.message]));
+          rememberLast([data.message]);
+        }
+        return null;
+      } catch (err) {
+        return errorMessage(err, 'Could not send the file.');
+      }
+    },
+    [conversationId, rememberLast],
+  );
+
   return {
     conversation,
     messages,
@@ -2304,6 +2327,7 @@ export function useTeamConversation(conversationId: number | null, myUserId: num
     error,
     sending,
     send,
+    sendFile,
     retry,
     discard,
     reactions,

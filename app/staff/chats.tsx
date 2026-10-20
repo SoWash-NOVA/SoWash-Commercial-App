@@ -59,6 +59,8 @@ import { DueBadge, DueBanner, TIMELINES, timelineMinutes, useNow } from '../../s
 import { isChatAdmin } from '../../src/chatAdmins';
 import { useVoiceHold, VoiceMicButton, VoiceRecordingBar } from '../../src/voiceRecorder';
 import { mediaKind, attachmentLabel } from '../../src/chat-media';
+import FilePickerSheet from '../../src/components/FilePickerSheet';
+import { FileError, pickDocument, uploadFile } from '../../src/staffFiles';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // Not a new native dependency — expo-router/@react-navigation already pull
 // this in for their own screen-transition gestures, so it's already
@@ -74,6 +76,7 @@ import { useLocalSearchParams, useFocusEffect } from 'expo-router';
 import {
   AtSign,
   CalendarDays,
+  Paperclip,
   Check,
   CheckCheck,
   Plus,
@@ -2492,6 +2495,8 @@ const TeamBubble = React.memo(function TeamBubble({
             mine={mine}
             accent={accent}
             sending={message.pending || message.failed}
+            fileId={message.file?.id ?? null}
+            fileSize={message.file?.size ?? null}
           />
         ) : url ? (
           <TouchableOpacity activeOpacity={0.9} disabled={message.pending || message.failed} onPress={() => onOpenPhoto(message.id)}>
@@ -2773,8 +2778,36 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
   const { accent } = useAccent();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
-  const { conversation, messages, loading, error, sending, send, retry, discard, reactions, react, typingUserIds, notifyTyping, stopTyping, hasMore, loadingOlder, loadOlder, deleteMessage } =
+  const { conversation, messages, loading, error, sending, send, retry, discard, reactions, react, typingUserIds, notifyTyping, stopTyping, hasMore, loadingOlder, loadOlder, deleteMessage, sendFile } =
     useTeamConversation(conversationId, user?.id);
+
+  // ── documents (office staff only): upload from the phone, or re-send one from the Shared Files library ──
+  const [fileBusy, setFileBusy] = useState(false);
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const sendLibraryFile = async (fileId: number) => {
+    const err = await sendFile(fileId);
+    if (err) Alert.alert('Could not send the file', err);
+  };
+  const uploadAndSendFile = async () => {
+    if (fileBusy) return;
+    try {
+      const doc = await pickDocument();
+      if (!doc) return;
+      setFileBusy(true);
+      const { file } = await uploadFile(doc);
+      await sendLibraryFile(file.id);
+    } catch (err) {
+      Alert.alert('Could not send the file', err instanceof FileError ? err.message : errorMessage(err, 'Upload failed.'));
+    } finally {
+      setFileBusy(false);
+    }
+  };
+  const openFileMenu = () =>
+    Alert.alert('Send a file', 'PDF, Word, Excel, PowerPoint, CSV, text or ZIP — up to 25 MB.', [
+      { text: 'Upload from phone', onPress: () => void uploadAndSendFile() },
+      { text: 'Choose from Shared Files', onPress: () => setShowFilePicker(true) },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   // Only an org-level admin can delete messages (the server enforces the same rule).
   const isAdmin = String(user?.role || '').trim().toLowerCase() === 'admin';
   const confirmDelete = (m: TeamMessage) => {
@@ -3315,6 +3348,18 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
               placeholderTextColor={palette.mutedLight}
               style={s.pillInput}
               multiline
+            />
+            <TouchableOpacity style={s.pillIcon} onPress={openFileMenu} disabled={fileBusy} hitSlop={6} accessibilityLabel="Send a file">
+              {fileBusy ? <ActivityIndicator size="small" color={palette.muted} /> : <Paperclip size={20} color={palette.muted} />}
+            </TouchableOpacity>
+            <FilePickerSheet
+              visible={showFilePicker}
+              accent={accent}
+              onClose={() => setShowFilePicker(false)}
+              onPick={(f) => {
+                setShowFilePicker(false);
+                void sendLibraryFile(f.id);
+              }}
             />
             {/* WhatsApp-style camera: tap = open camera (gallery button inside it), hold = record video straight away. */}
             <CameraPillButton onPicked={sendMedia} onLibrary={setPhoto} style={s.pillIcon} color={palette.muted} />

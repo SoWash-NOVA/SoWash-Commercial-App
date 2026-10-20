@@ -28,6 +28,7 @@ import type { VideoThumbnail } from 'expo-video';
 import { Mic, Pause, Play, X, VideoOff } from 'lucide-react-native';
 import { palette } from '../theme';
 import { PhotoThumb } from './PhotoStripList';
+import FileCard from './FileCard';
 import { keep } from '../themeEngine';
 import {
   durationFromName,
@@ -51,10 +52,16 @@ interface Props {
   accent: string;
   /** True while the message is still uploading — disables playback of the (local) file. */
   sending?: boolean;
+  /** Staff file library document (kind 'file'): its library id and size. */
+  fileId?: number | null;
+  fileSize?: number | null;
 }
 
-export default function ChatAttachment({ url, name, createdAt, mine, accent, sending }: Props) {
+export default function ChatAttachment({ url, name, createdAt, mine, accent, sending, fileId, fileSize }: Props) {
   const kind = mediaKind(name || url);
+  if (kind === 'file') {
+    return <FileCard fileId={fileId ?? null} name={name || 'File'} size={fileSize} mine={mine} accent={accent} sending={sending} />;
+  }
   if (kind === 'audio') return <VoiceNote url={url} name={name} mine={mine} accent={accent} sending={sending} />;
   if (kind === 'video') return <VideoNote url={url} name={name} createdAt={createdAt} mine={mine} sending={sending} />;
   return null;
@@ -410,6 +417,22 @@ function ActiveVoice({
   // (otherwise the knob visibly slides back to the start and then forward again).
   const [seekPending, setSeekPending] = useState(initialFraction > 0);
   const bars = useBars(name, url);
+  // One voice note at a time: claiming the slot pauses whichever other one is playing.
+  const myStop = useRef<(() => void) | null>(null);
+  const claimPlayback = () => {
+    if (stopCurrent && stopCurrent !== myStop.current) stopCurrent();
+    if (!myStop.current) {
+      myStop.current = () => {
+        try {
+          player.pause();
+        } catch {
+          /* already released */
+        }
+        onEnded();
+      };
+    }
+    stopCurrent = myStop.current;
+  };
   // While the finger is on the wave: where it is (0..1); the player is seeked once, when it lifts.
   const [scrub, setScrub] = useState<number | null>(null);
 
@@ -422,15 +445,7 @@ function ActiveVoice({
         /* playback still works on the default mode */
       }
       if (cancelled) return;
-      stopCurrent?.();
-      stopCurrent = () => {
-        try {
-          player.pause();
-        } catch {
-          /* already released */
-        }
-        onEnded();
-      };
+      claimPlayback();
       try {
         player.setPlaybackRate(preferredRate);
       } catch {
@@ -445,7 +460,9 @@ function ActiveVoice({
     })();
     return () => {
       cancelled = true;
-      if (stopCurrent) stopCurrent = null;
+      // Only release the slot if it is still ours — the previous voice note unmounts AFTER the new one
+      // has claimed it, and clearing it blindly let a third note play on top of the second.
+      if (stopCurrent === myStop.current) stopCurrent = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -526,7 +543,14 @@ function ActiveVoice({
     <View style={[st.voiceRow, { width: rowWidth }]}>
       <TouchableOpacity
         style={[st.voiceBtn, { backgroundColor: mine ? 'rgba(255,255,255,0.22)' : accent + '1f' }]}
-        onPress={() => (status.playing ? player.pause() : player.play())}
+        onPress={() => {
+          if (status.playing) {
+            player.pause();
+          } else {
+            claimPlayback();
+            player.play();
+          }
+        }}
         accessibilityLabel={status.playing ? 'Pause voice message' : 'Play voice message'}
       >
         {!status.isLoaded || seekPending ? (

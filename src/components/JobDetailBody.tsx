@@ -347,7 +347,7 @@ function PhotoStrip({
       {/* Virtualised: only the photos on/near the screen load; the first two get priority;
           a failed one shows tap-to-retry. */}
       {ready ? (
-        <PhotoStripList urls={urls} width={size} height={height} gap={10} radius={14} />
+        <PhotoStripList urls={urls} width={size} height={height} gap={10} radius={14} title={title} />
       ) : (
         <PhotoStripSkeleton width={size} height={height} radius={14} />
       )}

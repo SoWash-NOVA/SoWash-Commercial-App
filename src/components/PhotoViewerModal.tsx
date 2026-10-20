@@ -17,6 +17,7 @@ export interface ViewerPhoto {
   id: number;
   url: string;
   senderName: string | null;
+  /** Empty = no date line (visit photos carry none). */
   createdAt: string;
 }
 
@@ -51,7 +52,7 @@ export default function PhotoViewerModal({
             <Text style={st.name} numberOfLines={1}>
               {current?.senderName || 'Photo'}
             </Text>
-            {current ? <Text style={st.date}>{formatDateTime(current.createdAt)}</Text> : null}
+            {current?.createdAt ? <Text style={st.date}>{formatDateTime(current.createdAt)}</Text> : null}
           </View>
           {photos.length > 1 ? (
             <Text style={st.count}>
@@ -69,6 +70,7 @@ export default function PhotoViewerModal({
           initialScrollIndex={initialIndex}
           getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
           keyExtractor={(p) => String(p.id)}
+          onScrollToIndexFailed={() => {}}
           showsHorizontalScrollIndicator={false}
           onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / width))}
           renderItem={({ item }) => (

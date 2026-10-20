@@ -7,6 +7,14 @@
 //
 //   • BACK UP only ever ADDS/UPDATES on the server. A phone with fewer
 //     contacts (a new handset) never removes anything from the backup.
+//   • BACK UP runs AUTOMATICALLY while the staff app is in use (autoBackup(),
+//     started from app/staff/_layout.tsx) — no tap, no dialog; the company phone
+//     and SIM hold official contacts only. Android still shows its own one-time
+//     "allow contacts" prompt, which no app can skip. It is cheap when nothing
+//     changed (a fingerprint of the address book is kept per user).
+//   • RESTORE needs APPROVAL: the superadmin and any one admin must approve a
+//     request first (routes/phonebookRoutes.js "restore requests"); the server
+//     only hands the contacts out for an approved request.
 //   • RESTORE only ever ADDS to the phone. It never edits or deletes a contact
 //     that is already there, and it skips any contact whose phone number is
 //     already on the handset, so pressing it twice (or after a backup) cannot
@@ -25,6 +33,7 @@
 
 import { Alert, Linking, Platform } from 'react-native';
 import * as Contacts from 'expo-contacts/legacy';
+import * as SecureStore from 'expo-secure-store';
 import { api } from './api/client';
 
 // ───────────────────────────── types ─────────────────────────────
@@ -42,12 +51,57 @@ export type PhonebookContact = {
   phones: PhonebookPhone[];
   emails: PhonebookEmail[];
   updated_at: string;
+  /** Only on the admin Team view: whose backup this contact is in. */
+  owner_id?: number;
+  owner_name?: string;
 };
 
 export type PhonebookSummary = {
   total: number;
   last_synced_at: string | null;
   last_device_count: number | null;
+  /** May view everyone's contacts (decided by the server). */
+  is_admin?: boolean;
+  /** superadmin only: may open the Team view (everyone's contacts) */
+  can_view_team?: boolean;
+  /** May approve / reject restore requests. */
+  is_approver?: boolean;
+  approver_role?: 'superadmin' | 'admin' | null;
+  /** Requests waiting for THIS person's approval (badge). */
+  pending_requests?: number;
+};
+
+export type RequestApproval = { required: boolean; approved: boolean; by: string | null; at: string | null };
+
+/** One "restore my contacts" request and where it stands. */
+export type RestoreRequest = {
+  id: number;
+  status: 'pending' | 'approved' | 'used' | 'rejected' | 'cancelled' | 'expired';
+  note: string | null;
+  device: string | null;
+  contact_count: number;
+  created_at: string;
+  expires_at: string;
+  requester: { id: number; name: string; email: string | null; role: string | null };
+  approvals: { super: RequestApproval; admin: RequestApproval };
+  rejected: { by: string | null; reason: string | null; at: string | null } | null;
+  /** Seconds left to restore once approved. */
+  window_seconds_left: number | null;
+  used_at: string | null;
+  /** 'approve' when THIS viewer's approval is the missing piece. */
+  my_action: 'approve' | null;
+  can_reject: boolean;
+  can_restore: boolean;
+};
+
+/** One staff member in the admin Team view. */
+export type TeamUser = {
+  id: number;
+  name: string;
+  email: string | null;
+  type: string | null;
+  contact_count: number;
+  last_synced_at: string | null;
 };
 
 export type BackupResult = {
@@ -108,6 +162,69 @@ export async function fetchContacts(opts: {
   return data;
 }
 
+// ── restore requests ──
+
+/** A short label for the phone, shown to the approvers ("samsung SM-A715F"). */
+export function deviceLabel(): string {
+  const c = (Platform.constants ?? {}) as { Brand?: string; Model?: string };
+  return [c.Brand, c.Model].filter(Boolean).join(' ') || Platform.OS;
+}
+
+export async function fetchMyRestoreRequest(): Promise<RestoreRequest | null> {
+  const { data } = await api.get<{ request: RestoreRequest | null }>('phonebook/restore-requests/mine');
+  return data.request;
+}
+
+export async function createRestoreRequest(note?: string): Promise<RestoreRequest> {
+  const { data } = await api.post<{ request: RestoreRequest }>('phonebook/restore-requests', {
+    note: note?.trim() || undefined,
+    device: deviceLabel(),
+  });
+  return data.request;
+}
+
+export async function cancelRestoreRequest(id: number): Promise<void> {
+  await api.post(`phonebook/restore-requests/${id}/cancel`);
+}
+
+/** Approvers / viewing admins: what is waiting, and what was decided in the last 7 days. */
+export async function fetchRestoreRequests(): Promise<{ open: RestoreRequest[]; history: RestoreRequest[] }> {
+  const { data } = await api.get('phonebook/restore-requests');
+  return data;
+}
+
+export async function approveRestoreRequest(id: number): Promise<RestoreRequest> {
+  const { data } = await api.post<{ request: RestoreRequest }>(`phonebook/restore-requests/${id}/approve`);
+  return data.request;
+}
+
+export async function rejectRestoreRequest(id: number, reason?: string): Promise<RestoreRequest> {
+  const { data } = await api.post<{ request: RestoreRequest }>(`phonebook/restore-requests/${id}/reject`, {
+    reason: reason?.trim() || undefined,
+  });
+  return data.request;
+}
+
+/** Admin only (server-enforced, read-only): every staff member who has a backup. */
+export async function fetchTeamUsers(): Promise<TeamUser[]> {
+  const { data } = await api.get<{ users: TeamUser[] }>('phonebook/admin/users');
+  return data.users;
+}
+
+/** Admin only (server-enforced, read-only): all users' contacts, or one user's. */
+export async function fetchTeamContacts(opts: {
+  userId?: number | null;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ contacts: PhonebookContact[]; total: number; has_more: boolean }> {
+  const { userId, ...rest } = opts;
+  const { data } = await api.get('phonebook/admin/contacts', {
+    params: { ...rest, ...(userId ? { user_id: userId } : {}) },
+  });
+  return data;
+}
+
 export async function deleteContact(id: number): Promise<void> {
   await api.delete(`phonebook/contacts/${id}`);
 }
@@ -120,14 +237,14 @@ export async function deleteContact(id: number): Promise<void> {
  * ask again") it offers Settings, which is the only place left to fix it — the
  * same lesson as the microphone permission.
  */
-export async function ensureContactsPermission(): Promise<void> {
+export async function ensureContactsPermission(interactive = true): Promise<void> {
   if (Platform.OS === 'web') throw new PhonebookError('The phone book works on the phone app only.');
 
   let perm = await Contacts.getPermissionsAsync();
   if (!perm.granted && perm.canAskAgain) perm = await Contacts.requestPermissionsAsync();
   if (perm.granted) return;
 
-  if (!perm.canAskAgain) {
+  if (!perm.canAskAgain && interactive) {
     Alert.alert(
       'Contacts access is off',
       'Allow Contacts for SoWash in your phone settings, then come back and try again.',
@@ -223,54 +340,144 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 const UPLOAD_BATCH = 150; // keep each request small (server accepts 200)
 
-export function backupContacts(onProgress: (p: Progress) => void): Promise<BackupResult> {
+/** FNV-1a over the usable contacts (order-independent): "did the address book change?" */
+function fingerprint(list: DeviceContact[]): string {
+  const lines = list
+    .map((c) =>
+      [
+        c.name ?? '',
+        c.company ?? '',
+        c.job_title ?? '',
+        c.phones.map((p) => `${p.label}:${p.number}`).sort().join(','),
+        c.emails.map((e) => e.email).sort().join(','),
+      ].join('|'),
+    )
+    .sort();
+  let h = 0x811c9dc5;
+  const text = lines.join('\n');
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${h.toString(16)}-${list.length}`;
+}
+
+const fpKey = (userId: number) => `phonebookFp_${userId}`;
+const AUTO_FULL_RESYNC_MS = 24 * 60 * 60 * 1000; // even if nothing changed, re-send once a day
+
+async function readFp(userId: number): Promise<{ fp: string; at: number } | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(fpKey(userId));
+    if (!raw) return null;
+    const [fp, at] = raw.split('@');
+    return { fp, at: Number(at) || 0 };
+  } catch {
+    return null;
+  }
+}
+
+async function writeFp(userId: number, fp: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(fpKey(userId), `${fp}@${Date.now()}`);
+  } catch {
+    /* losing it only means the next auto-backup uploads once more */
+  }
+}
+
+/** Read the phone and upload what has a number. Caller holds the exclusive lock and the permission. */
+async function backupCore(
+  onProgress: (p: Progress) => void,
+  skipIfUnchangedFor?: number,
+): Promise<{ result: BackupResult; fp: string } | null> {
+  const device = await readDeviceContacts(onProgress);
+  const usable = device.filter((c) => c.phones.some((p) => phoneKey(p.number)));
+  const fp = fingerprint(usable);
+
+  if (skipIfUnchangedFor !== undefined) {
+    const prev = await readFp(skipIfUnchangedFor);
+    if (prev && prev.fp === fp && Date.now() - prev.at < AUTO_FULL_RESYNC_MS) return null; // nothing new
+  }
+
+  const result: BackupResult = {
+    deviceTotal: device.length,
+    sent: usable.length,
+    inserted: 0,
+    updated: 0,
+    unchanged: 0,
+    skippedDeleted: 0,
+    noNumber: device.length - usable.length,
+  };
+
+  // An empty address book is never reported as a finished backup: it would
+  // move "last backed up" without having saved anything.
+  if (usable.length === 0) return { result, fp };
+
+  for (let i = 0; i < usable.length; i += UPLOAD_BATCH) {
+    const batch = usable.slice(i, i + UPLOAD_BATCH);
+    const last = i + UPLOAD_BATCH >= usable.length;
+    const { data } = await api.post('phonebook/sync', {
+      contacts: batch,
+      finished: last,
+      device_count: device.length,
+    });
+    result.inserted += data.inserted ?? 0;
+    result.updated += data.updated ?? 0;
+    result.unchanged += data.unchanged ?? 0;
+    result.skippedDeleted += data.skipped_deleted ?? 0;
+    onProgress({
+      label: 'Backing up contacts…',
+      done: Math.min(i + UPLOAD_BATCH, usable.length),
+      total: usable.length,
+    });
+  }
+  if (skipIfUnchangedFor !== undefined) await writeFp(skipIfUnchangedFor, fp);
+  return { result, fp };
+}
+
+/** The "Back up now" button: always uploads, and shows the result. */
+export function backupContacts(onProgress: (p: Progress) => void, userId?: number): Promise<BackupResult> {
   return exclusive(async () => {
     await ensureContactsPermission();
-
-    const device = await readDeviceContacts(onProgress);
-    const usable = device.filter((c) => c.phones.some((p) => phoneKey(p.number)));
-
-    const result: BackupResult = {
-      deviceTotal: device.length,
-      sent: usable.length,
-      inserted: 0,
-      updated: 0,
-      unchanged: 0,
-      skippedDeleted: 0,
-      noNumber: device.length - usable.length,
-    };
-
-    // An empty address book is never reported as a finished backup: it would
-    // move "last backed up" without having saved anything.
-    if (usable.length === 0) return result;
-
-    for (let i = 0; i < usable.length; i += UPLOAD_BATCH) {
-      const batch = usable.slice(i, i + UPLOAD_BATCH);
-      const last = i + UPLOAD_BATCH >= usable.length;
-      const { data } = await api.post('phonebook/sync', {
-        contacts: batch,
-        finished: last,
-        device_count: device.length,
-      });
-      result.inserted += data.inserted ?? 0;
-      result.updated += data.updated ?? 0;
-      result.unchanged += data.unchanged ?? 0;
-      result.skippedDeleted += data.skipped_deleted ?? 0;
-      onProgress({
-        label: 'Backing up contacts…',
-        done: Math.min(i + UPLOAD_BATCH, usable.length),
-        total: usable.length,
-      });
-    }
-    return result;
+    const out = (await backupCore(onProgress)) as { result: BackupResult; fp: string };
+    // remember it so the automatic backup does not repeat the same upload
+    if (userId !== undefined && out.result.sent > 0) await writeFp(userId, out.fp);
+    return out.result;
   });
+}
+
+// Automatic backup. Called when the staff app opens and when it returns to the
+// foreground. Never shows a dialog and never throws: if something is not
+// possible (permission refused, offline, a restore running) it simply does not
+// run and tries again later.
+const AUTO_MIN_GAP_MS = 20 * 60 * 1000;
+let lastAutoAt = 0;
+let askedThisSession = false;
+
+export async function autoBackup(userId: number): Promise<void> {
+  if (Platform.OS === 'web') return;
+  if (Date.now() - lastAutoAt < AUTO_MIN_GAP_MS) return;
+  lastAutoAt = Date.now();
+  try {
+    let perm = await Contacts.getPermissionsAsync();
+    if (!perm.granted) {
+      // Ask the OS at most once per app launch, and never again once Android says "don't ask again".
+      if (!perm.canAskAgain || askedThisSession) return;
+      askedThisSession = true;
+      perm = await Contacts.requestPermissionsAsync();
+      if (!perm.granted) return;
+    }
+    await exclusive(() => backupCore(() => {}, userId));
+  } catch (err) {
+    if (__DEV__) console.warn('[phonebook] auto backup skipped:', err);
+  }
 }
 
 // ───────────────────────────── restore ─────────────────────────────
 
 const RESTORE_PAGE = 300;
 
-export function restoreContacts(onProgress: (p: Progress) => void): Promise<RestoreResult> {
+/** Needs an APPROVED request: the server refuses the contacts otherwise. */
+export function restoreContacts(requestId: number, onProgress: (p: Progress) => void): Promise<RestoreResult> {
   return exclusive(async () => {
     await ensureContactsPermission();
 
@@ -287,7 +494,10 @@ export function restoreContacts(onProgress: (p: Progress) => void): Promise<Rest
     let handled = 0;
 
     for (;;) {
-      const page = await fetchContacts({ limit: RESTORE_PAGE, offset, sort: 'id' });
+      const { data: page } = await api.get<{ contacts: PhonebookContact[]; total: number; has_more: boolean }>(
+        `phonebook/restore-requests/${requestId}/contacts`,
+        { params: { limit: RESTORE_PAGE, offset } },
+      );
       result.total = page.total;
 
       for (const c of page.contacts) {
@@ -297,12 +507,12 @@ export function restoreContacts(onProgress: (p: Progress) => void): Promise<Rest
           result.alreadyOnPhone++;
         } else {
           try {
-            const first = c.given_name || c.family_name ? c.given_name || '' : c.display_name;
+            const hasParts = !!(c.given_name || c.family_name);
             await Contacts.addContactAsync({
               contactType: Contacts.ContactTypes.Person,
               name: c.display_name,
-              firstName: first,
-              lastName: c.given_name || c.family_name ? c.family_name || '' : '',
+              firstName: hasParts ? c.given_name || '' : c.display_name,
+              lastName: hasParts ? c.family_name || '' : '',
               company: c.company || undefined,
               jobTitle: c.job_title || undefined,
               phoneNumbers: c.phones.map((p) => ({ label: p.label, number: p.number })),
@@ -325,6 +535,66 @@ export function restoreContacts(onProgress: (p: Progress) => void): Promise<Rest
     }
 
     onProgress({ label: 'Restoring contacts to this phone…', done: result.total, total: result.total });
+    // Single use: close the approval once everything went in. If some failed, leave it open so the
+    // user can retry inside the window.
+    if (result.failed === 0) {
+      try {
+        await api.post(`phonebook/restore-requests/${requestId}/complete`);
+      } catch {
+        /* the window simply runs out */
+      }
+    }
     return result;
   });
+}
+
+// ── share a contact into Team chat ──
+
+/** The chat text for one contact. Plain text on purpose: readable in every build, and copy-able. */
+export function contactShareText(c: PhonebookContact): string {
+  const lines = ['Contact', c.display_name];
+  const org = [c.company, c.job_title].filter(Boolean).join(' · ');
+  if (org) lines.push(org);
+  for (const p of c.phones) lines.push(p.label ? `${p.number} (${p.label})` : p.number);
+  for (const e of c.emails) lines.push(e.email);
+  return lines.join('\n');
+}
+
+/** Post the contact as a normal text message into an existing Team DM / group. Throws on failure. */
+export async function shareContactToConversation(conversationId: number, c: PhonebookContact): Promise<void> {
+  const form = new FormData();
+  form.append('body', contactShareText(c));
+  await api.post(`staff-chat/conversations/${conversationId}/messages`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+}
+
+// ── supervisors (team leads from C&I Team Management) ──
+
+export type Supervisor = {
+  id: number;
+  name: string;
+  phone: string | null;
+  team_type: string | null;
+  member_count: number;
+};
+
+export async function fetchSupervisors(): Promise<Supervisor[]> {
+  const { data } = await api.get('phonebook/supervisors');
+  return data.supervisors ?? [];
+}
+
+/** A supervisor as a shareable contact (negative id: it is not one of the user's backed-up contacts). */
+export function supervisorAsContact(sv: Supervisor): PhonebookContact {
+  return {
+    id: -sv.id,
+    display_name: `${sv.name} (Supervisor)`,
+    given_name: null,
+    family_name: null,
+    company: 'SoWash',
+    job_title: 'Supervisor',
+    phones: sv.phone ? [{ label: 'mobile', number: sv.phone }] : [],
+    emails: [],
+    updated_at: '',
+  };
 }

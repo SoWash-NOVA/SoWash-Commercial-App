@@ -111,8 +111,8 @@ export default function PrivacyScreen() {
           <Bullet>
             We never access your calendar or call history. The camera and microphone are used only
             when you choose to take a photo or video or record a voice message in a chat. Your
-            contacts are read only when a SoWash staff member taps Back up or Restore in the
-            staff Phone Book — client accounts never use or see this.
+            contacts are read only in the SoWash staff app, to back up the company phone's
+            contacts and to restore them — client accounts never use or see this.
           </Bullet>
           <Bullet>No advertising identifiers, no third-party analytics, no cross-app tracking.</Bullet>
           <Bullet>
@@ -122,10 +122,12 @@ export default function PrivacyScreen() {
 
         <Section title="Staff phone book">
           <P>
-            This applies to SoWash office staff using the company phone. If a staff member taps
-            Back up in the Phone Book, the names, phone numbers, email addresses and company details
-            of the contacts on that phone are saved on our server, private to that staff
-            member&apos;s account, so they can be restored on a replacement phone. A contact is
+            This applies to SoWash office staff using the company phone. Once a staff member has
+            allowed contacts access, the names, phone numbers, email addresses and company details
+            of the contacts on that phone are saved on our server automatically whenever the app is
+            used, so they can be restored on a replacement phone. Restoring them onto a phone needs
+            approval from the SoWash superadmin and an administrator. They are visible to that staff member and to SoWash administrators,
+            and to no one else. A contact is
             never removed from the backup just because it is missing from the phone. The staff
             member can remove any contact from their backup in the app, and can ask SoWash to
             delete all of it.

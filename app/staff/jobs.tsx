@@ -416,7 +416,7 @@ function PhotoRow({ title, urls, ready }: { title: string; urls: string[]; ready
         {title.toUpperCase()} · {urls.length}
       </Text>
       {ready ? (
-        <PhotoStripList urls={urls} width={PHOTO_W} height={PHOTO_H} gap={8} radius={10} />
+        <PhotoStripList urls={urls} width={PHOTO_W} height={PHOTO_H} gap={8} radius={10} title={title} />
       ) : (
         <PhotoStripSkeleton width={PHOTO_W} height={PHOTO_H} radius={10} />
       )}

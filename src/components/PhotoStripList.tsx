@@ -24,7 +24,7 @@
 //    happen off the JS thread; the popup itself opens first (see useAfterOpen) and the
 //    photo rows mount a beat later, so the slide-in animation isn't competing with them.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { tc } from '../themeEngine';
 import {
   ActivityIndicator,
@@ -37,6 +37,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { ImageOff, RotateCw } from 'lucide-react-native';
+import PhotoViewerModal, { ViewerPhoto } from './PhotoViewerModal';
 
 const TILE_BG = '#e9eff5';
 
@@ -122,15 +123,25 @@ export function PhotoStripList({
   height,
   gap = 8,
   radius = 12,
+  title = 'Photo',
 }: {
   urls: string[];
   width: number;
   height: number;
   gap?: number;
   radius?: number;
+  /** Shown at the top of the full-screen viewer ("Before", "After"…) with the photo's position. */
+  title?: string;
 }) {
   const step = width + gap;
+  // Tap a tile -> full-screen viewer with pinch / double-tap zoom, swiping through this row's photos.
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const viewerPhotos = useMemo<ViewerPhoto[]>(
+    () => urls.map((url, i) => ({ id: i, url, senderName: `${title} · ${i + 1} of ${urls.length}`, createdAt: '' })),
+    [urls, title],
+  );
   return (
+    <>
     <FlatList
       horizontal
       data={urls}
@@ -148,10 +159,16 @@ export function PhotoStripList({
       getItemLayout={(_, index) => ({ length: step, offset: step * index, index })}
       renderItem={({ item, index }) => (
         <View style={{ width: step }}>
-          <PhotoThumb url={item} width={width} height={height} radius={radius} priority={index < 2 ? 'high' : 'low'} />
+          <TouchableOpacity activeOpacity={0.9} onPress={() => setViewerIndex(index)} accessibilityLabel={`Open ${title} photo ${index + 1}`}>
+            <PhotoThumb url={item} width={width} height={height} radius={radius} priority={index < 2 ? 'high' : 'low'} />
+          </TouchableOpacity>
         </View>
       )}
     />
+    {viewerIndex !== null ? (
+      <PhotoViewerModal photos={viewerPhotos} initialIndex={viewerIndex} onClose={() => setViewerIndex(null)} />
+    ) : null}
+    </>
   );
 }
 

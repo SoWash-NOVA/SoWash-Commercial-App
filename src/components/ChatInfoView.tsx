@@ -60,7 +60,7 @@ export default function ChatInfoView({
     for (const m of messages) {
       if (m.id <= 0 || !m.attachment_url) continue;
       const kind = mediaKind(m.attachment_name || m.attachment_url);
-      if (kind === 'audio') continue;
+      if (kind === 'audio' || kind === 'file') continue;
       const url = photoUrl(m.attachment_url);
       if (!url) continue;
       const mine = m.sender_user_id != null && m.sender_user_id === myUserId;

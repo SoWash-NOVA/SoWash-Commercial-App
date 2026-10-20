@@ -5,7 +5,7 @@
 // notes, videos), so there is no `kind` field. The apps name recordings
 // voice-<seconds>.m4a and video-<seconds>.mp4, which also carries the duration.
 
-export type ChatMediaKind = 'image' | 'audio' | 'video';
+export type ChatMediaKind = 'image' | 'audio' | 'video' | 'file';
 
 export const VIDEO_RETENTION_DAYS = 30;
 export const MAX_VIDEO_SECONDS = 30;
@@ -13,11 +13,14 @@ export const MAX_VOICE_SECONDS = 5 * 60;
 
 const AUDIO_EXT = /\.(m4a|aac|mp3|ogg|opus|wav)$/i;
 const VIDEO_EXT = /\.(mp4|mov|webm)$/i;
+// Documents from the staff file library (see src/staffFiles.ts). Mirrors the backend's allow-list.
+const FILE_EXT = /\.(pdf|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|zip|dwg|dxf)$/i;
 
 export function mediaKind(urlOrName: string | null | undefined): ChatMediaKind {
   const clean = (urlOrName ?? '').split('?')[0];
   if (AUDIO_EXT.test(clean)) return 'audio';
   if (VIDEO_EXT.test(clean)) return 'video';
+  if (FILE_EXT.test(clean)) return 'file';
   return 'image';
 }
 
@@ -95,5 +98,5 @@ export function formatClock(seconds: number): string {
 /** Short text for reply quotes / previews of an attachment-only message. */
 export function attachmentLabel(urlOrName: string | null | undefined): string {
   const kind = mediaKind(urlOrName);
-  return kind === 'audio' ? '🎤 Voice message' : kind === 'video' ? '🎥 Video' : '📷 Photo';
+  return kind === 'audio' ? '🎤 Voice message' : kind === 'video' ? '🎥 Video' : kind === 'file' ? '📎 File' : '📷 Photo';
 }

@@ -4,10 +4,11 @@
 // without a working sign-out, anyone testing the office session is stuck
 // signed in until they clear app storage by hand.
 
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Alert, StyleSheet } from 'react-native';
-import { useRouter } from 'expo-router';
-import { BookUser, ChevronRight, LogOut, Mail, Shield } from 'lucide-react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { fetchSummary } from '../../src/phonebook';
+import { BookUser, ChevronRight, FolderOpen, LogOut, Mail, Shield } from 'lucide-react-native';
 import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useAuth, initialsOf } from '../../src/auth/AuthContext';
@@ -27,6 +28,19 @@ export default function StaffAccountScreen() {
   const { accent } = useAccent();
   const { user, signOut } = useAuth();
   const router = useRouter();
+  // approvers see how many restore requests are waiting for them
+  const [waiting, setWaiting] = useState(0);
+  useFocusEffect(
+    useCallback(() => {
+      let live = true;
+      fetchSummary()
+        .then((s) => live && setWaiting(s.pending_requests ?? 0))
+        .catch(() => {});
+      return () => {
+        live = false;
+      };
+    }, []),
+  );
 
   const confirmSignOut = () => {
     Alert.alert('Sign out', 'You will need your email and password to sign back in.', [
@@ -68,7 +82,31 @@ export default function StaffAccountScreen() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={local.linkTitle}>Phone Book</Text>
-            <Text style={local.linkSub}>Back up and restore your phone’s contacts</Text>
+            <Text style={local.linkSub}>
+              {waiting > 0
+                ? `${waiting} restore request${waiting === 1 ? '' : 's'} waiting for you`
+                : 'Your phone’s contacts, backed up automatically'}
+            </Text>
+          </View>
+          {waiting > 0 ? (
+            <View style={local.linkBadge}>
+              <Text style={local.linkBadgeText}>{waiting}</Text>
+            </View>
+          ) : null}
+          <ChevronRight size={18} color={palette.mutedLight} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[local.card, local.linkRow]}
+          activeOpacity={0.85}
+          onPress={() => router.push('/files' as never)}
+        >
+          <View style={[local.linkIcon, { backgroundColor: `${accent}14` }]}>
+            <FolderOpen size={18} color={accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={local.linkTitle}>Shared Files</Text>
+            <Text style={local.linkSub}>Files sent in chats — share again without uploading</Text>
           </View>
           <ChevronRight size={18} color={palette.mutedLight} />
         </TouchableOpacity>
@@ -107,6 +145,16 @@ const local = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   linkIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  linkBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  linkBadgeText: { color: '#fff', fontSize: 11.5, fontWeight: '900' },
   linkTitle: { fontSize: 14.5, fontWeight: '800', color: palette.ink },
   linkSub: { fontSize: 12, fontWeight: '600', color: palette.muted, marginTop: 2 },
   rowText: { fontSize: 14, fontWeight: '600', color: palette.ink },

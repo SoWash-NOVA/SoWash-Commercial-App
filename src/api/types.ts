@@ -899,6 +899,8 @@ export interface TeamMessage {
   body: string | null;
   attachment_url: string | null;
   attachment_name: string | null;
+  /** A document from the staff file library (attachment_url then points at its download route). */
+  file?: { id: number; name: string; size: number } | null;
   created_at: string;
   sender_name: string | null;
   mentioned_user_id: number | null;
