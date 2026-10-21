@@ -9,6 +9,11 @@ Newest first. Each entry: what changed, in which file(s)/repo, and deploy status
 backend's deploys are **manual** — WinSCP sync + `pm2 restart` on the VPS, nothing here
 auto-deploys, so "fixed" below means "fixed in this working tree," not "live").
 
+### 2026-10-21 — Files open in the phone's viewers; "%20" in file names fixed (device-verified by the user)
+
+**Names:** the phone's HTTP client percent-encodes the multipart file name, so "My File.pdf" was stored as "My%20File.pdf". `fixName` in `services/staffFiles.js` now decodes it; the app also decodes for display (`displayName` in `src/staffFiles.ts`) so older rows look right. Old rows can be fixed with `UPDATE staff_files SET name = REPLACE(name, '%20', ' ') WHERE name LIKE '%\%20%' ESCAPE '';` (optional).
+**Open in app:** `openFile(id, name)` downloads the file once into the app cache (`expo-file-system`, `cache/staff-files/<id>/<name>`; a second open is instant) and hands it to the system "Open with" sheet (`expo-sharing`). No browser. New native modules, so a new EAS build was needed (`expo-sharing` plugin in `app.json`). Tested by the user: upload, open, dedupe all work. Client accounts never get the Phone Book permission prompt (contacts code runs only from `app/staff/_layout.tsx`); Play Console still needs a contacts-permission declaration + Data safety entries for contacts and chat files (staff only).
+
 ### 2026-10-21 — End-of-day state (handoff)
 
 Pushed as commit `4e2f1e9`: Phone Book approval flow + auto-backup, Team view superadmin-only, share contacts to chat (multi-select, keyboard-safe sheet), Supervisors tab, one voice note plays at a time, zoomable visit photos, Team chat files + Shared Files library. An Employee ID for supervisors was tried and reverted (no source data; the empty `users.employee_id` column was created on the live DB and is harmless). A new EAS dev build (needs `expo-document-picker`) was started. Backend still to be deployed by hand (see CLAUDE.md §10 HANDOFF); nothing from today is device-tested yet.
