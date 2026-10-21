@@ -25,6 +25,7 @@ import {
   CreditCard,
   FileText,
   Hash,
+  KeyRound,
   LogOut,
   Mail,
   Phone,
@@ -218,6 +219,11 @@ export default function ProfileScreen() {
             icon={<FileText size={16} color={palette.muted} />}
             label="Documentation"
             onPress={() => router.push('/documentation' as never)}
+          />
+          <LinkRow
+            icon={<KeyRound size={16} color={palette.muted} />}
+            label="Change password"
+            onPress={() => router.push('/change-password' as never)}
           />
           <LinkRow
             icon={<ShieldCheck size={16} color={palette.muted} />}

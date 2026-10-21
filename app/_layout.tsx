@@ -50,6 +50,9 @@ const STAFF_ROOT = '/staff';
  */
 const STAFF_STACK_SEGMENTS = ['phonebook', 'files'];
 
+/** Full-screen pages BOTH identities use (clients and staff): never bounced by either guard. */
+const SHARED_STACK_SEGMENTS = ['change-password'];
+
 function RootNavigator() {
   const { status, appRole } = useAuth();
   const segments = useSegments();
@@ -90,7 +93,7 @@ function RootNavigator() {
     // first redirect after sign-in, which always lands on "/") belongs there
     // instead — the client tab tree assumes a client_id that a staff user
     // does not have.
-    if (appRole === 'staff' && !onStaffRoute) {
+    if (appRole === 'staff' && !onStaffRoute && !SHARED_STACK_SEGMENTS.includes(segments[0] as string)) {
       router.replace(STAFF_ROOT);
       return;
     }

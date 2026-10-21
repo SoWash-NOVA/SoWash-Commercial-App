@@ -9,6 +9,10 @@ Newest first. Each entry: what changed, in which file(s)/repo, and deploy status
 backend's deploys are **manual** — WinSCP sync + `pm2 restart` on the VPS, nothing here
 auto-deploys, so "fixed" below means "fixed in this working tree," not "live").
 
+### 2026-10-21 — Change password (clients + office staff) (typecheck clean; NOT run on a device or against the DB)
+
+New screen `app/change-password.tsx` (current / new / confirm, show-hide, min 8 chars), linked from Account on both sides (`app/(tabs)/profile.tsx` row, `app/staff/account.tsx` card). `app/_layout.tsx` has `SHARED_STACK_SEGMENTS` so neither role guard bounces it. Backend: `POST /api/customer-portal/auth/change-password` in `routes/portalAuthRoutes.js` accepts a `portal` OR `office_portal` token, user id from the token, checks the current password with bcrypt, stores bcrypt cost 10 like the web console, refuses demo accounts, throttles wrong current-password guesses (5 per 15 min per user, in memory), logs `PASSWORD_CHANGED_BY_USER`. No SQL. Existing 30-day sessions stay valid after a change (stateless JWT). JS-only on the app side; backend needs `routes/portalAuthRoutes.js` uploaded + restart.
+
 ### 2026-10-21 — Files open in the phone's viewers; "%20" in file names fixed (device-verified by the user)
 
 **Names:** the phone's HTTP client percent-encodes the multipart file name, so "My File.pdf" was stored as "My%20File.pdf". `fixName` in `services/staffFiles.js` now decodes it; the app also decodes for display (`displayName` in `src/staffFiles.ts`) so older rows look right. Old rows can be fixed with `UPDATE staff_files SET name = REPLACE(name, '%20', ' ') WHERE name LIKE '%\%20%' ESCAPE '';` (optional).

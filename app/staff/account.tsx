@@ -8,7 +8,7 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Alert, StyleSheet } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { fetchSummary } from '../../src/phonebook';
-import { BookUser, ChevronRight, FolderOpen, LogOut, Mail, Shield } from 'lucide-react-native';
+import { BookUser, ChevronRight, FolderOpen, KeyRound, LogOut, Mail, Shield } from 'lucide-react-native';
 import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useAuth, initialsOf } from '../../src/auth/AuthContext';
@@ -107,6 +107,21 @@ export default function StaffAccountScreen() {
           <View style={{ flex: 1 }}>
             <Text style={local.linkTitle}>Shared Files</Text>
             <Text style={local.linkSub}>Files sent in chats — share again without uploading</Text>
+          </View>
+          <ChevronRight size={18} color={palette.mutedLight} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[local.card, local.linkRow]}
+          activeOpacity={0.85}
+          onPress={() => router.push('/change-password' as never)}
+        >
+          <View style={[local.linkIcon, { backgroundColor: `${accent}14` }]}>
+            <KeyRound size={18} color={accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={local.linkTitle}>Change password</Text>
+            <Text style={local.linkSub}>Set a new password for your account</Text>
           </View>
           <ChevronRight size={18} color={palette.mutedLight} />
         </TouchableOpacity>
