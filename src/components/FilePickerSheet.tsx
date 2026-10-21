@@ -6,7 +6,7 @@ import { ActivityIndicator, FlatList, Modal, StyleSheet, Text, TextInput, Toucha
 import { Search, X } from 'lucide-react-native';
 import { palette } from '../theme';
 import { errorMessage } from '../api/client';
-import { fetchFiles, formatBytes, StaffFile } from '../staffFiles';
+import { displayName, fetchFiles, formatBytes, StaffFile } from '../staffFiles';
 import { FileTypeIcon } from './FileCard';
 import KeyboardScreen from './KeyboardScreen';
 import { formatDateTime } from '../hooks';
@@ -96,7 +96,7 @@ export default function FilePickerSheet({
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={sh.name} numberOfLines={1}>
-                    {item.name}
+                    {displayName(item.name)}
                   </Text>
                   <Text style={sh.rowSub} numberOfLines={1}>
                     {[formatBytes(item.size), item.mine ? 'You' : item.owner_name, formatDateTime(item.created_at)].filter(Boolean).join(' · ')}

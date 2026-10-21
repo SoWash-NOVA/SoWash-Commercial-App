@@ -9,6 +9,10 @@ Newest first. Each entry: what changed, in which file(s)/repo, and deploy status
 backend's deploys are **manual** — WinSCP sync + `pm2 restart` on the VPS, nothing here
 auto-deploys, so "fixed" below means "fixed in this working tree," not "live").
 
+### 2026-10-21 — End-of-day state (handoff)
+
+Pushed as commit `4e2f1e9`: Phone Book approval flow + auto-backup, Team view superadmin-only, share contacts to chat (multi-select, keyboard-safe sheet), Supervisors tab, one voice note plays at a time, zoomable visit photos, Team chat files + Shared Files library. An Employee ID for supervisors was tried and reverted (no source data; the empty `users.employee_id` column was created on the live DB and is harmless). A new EAS dev build (needs `expo-document-picker`) was started. Backend still to be deployed by hand (see CLAUDE.md §10 HANDOFF); nothing from today is device-tested yet.
+
 ### 2026-10-21 — Team chat files + "Shared Files" library (office staff only) (backend tested on a REAL Postgres 18: 43 checks pass; app typecheck clean; NOT run on a device)
 
 **What it does.** In a Team DM / group, the composer has a paperclip: *Upload from phone* (system file chooser) or *Choose from Shared Files* (re-send a stored file — nothing is uploaded again). Account > *Shared Files* is the library screen (`app/files.tsx`): search, upload, open/download, send to any chat (shared `ChatTargetSheet`), remove your own. Documents show in the bubble as a file card (icon, name, type · size) — tap downloads/opens. Client accounts and the client-support chat are untouched (no file option there, client chat has no change).

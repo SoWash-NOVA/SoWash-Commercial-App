@@ -6,7 +6,7 @@ Keep it updated as the code changes — it will go stale otherwise.
 **Size rule:** keep this file well under 150k characters (it is loaded into every session). The history of
 completed work lives in **`docs/CHANGELOG.md`** (newest first, ~200k chars) — append new entries THERE, not here,
 and read it on demand (grep it by topic) rather than in full. Only update §10 "Current state" here.
-**Last full update: 2026-10-20** (changelog split out; §1–§9 content last refreshed 2026-10-07).
+**Last full update: 2026-10-21** (changelog split out; §1–§9 content last refreshed 2026-10-07).
 
 ---
 ## 1. What this app is
@@ -443,7 +443,7 @@ about the backend checkout being stale):
 
 ## 10. Current state and changelog
 
-Full history: **`docs/CHANGELOG.md`** (append new entries there). Snapshot as of 2026-10-20 — RE-VERIFY, it ages fast:
+Full history: **`docs/CHANGELOG.md`** (append new entries there). Snapshot as of 2026-10-21 — RE-VERIFY, it ages fast:
 
 - **Typecheck** was clean at the last run; most recent UI/chat work was never seen on a device (the changelog says
   per entry).
@@ -452,6 +452,7 @@ Full history: **`docs/CHANGELOG.md`** (append new entries there). Snapshot as of
   `routes/{commercialChatRoutes,staffChatRoutes,customerJobHistoryRoutes}.js`.
 - **Migrations that may still need running** (in `docs/migrations/`): `2026-10-08-commercial-chat-delivered.sql`,
   `2026-10-08-commercial-chat-due.sql`, `2026-10-09-app-release-info.sql`. Run BEFORE uploading the routes.
+- **HANDOFF (end of 2026-10-21) — in progress:** commit `4e2f1e9` is pushed; a NEW dev build (adds `expo-document-picker`) was started on EAS. Nothing from today's work has been run on a device yet. UPDATE: the user then ran all the SQL and uploaded all the backend files to the VPS (phonebookRoutes, staffChatRoutes, staffFiles, chatMedia) and restarted; only the new dev build + device testing remain. (Original list follows.) Still to do by the user: (1) run migrations `2026-10-20-staff-phonebook.sql` (done), `2026-10-21-staff-phonebook-restore-requests.sql` (done earlier), `2026-10-21-staff-files.sql` (NOT confirmed); (2) upload to the VPS `routes/phonebookRoutes.js` (Team view = superadmin only + `/supervisors`), `routes/staffChatRoutes.js`, `services/staffFiles.js` (new), `services/chatMedia.js`, then `pm2 restart all`; (3) install the new build and test: Phone Book (auto-backup, restore approval, Supervisors tab, multi-select share), Team chat files (paperclip, Shared Files, dedupe), visit photo zoom, one-voice-note-at-a-time. The unused `users.employee_id` column exists in the DB (harmless; drop with `ALTER TABLE public.users DROP COLUMN IF EXISTS employee_id;`). Ideas not done: Employee ID for supervisors (no source in the DB), web-console UI for it, attendance thumbnails tappable, Play Store contacts-permission declaration / Data safety form.
 - **Staff Phone Book (2026-10-20/21):** backs up AUTOMATICALLY (`autoBackup`, started in `app/staff/_layout.tsx`); Restore needs approval from the superadmin + any ONE `Type='admin'` user (`SUPERADMIN_EMAIL` / `ADMIN_APPROVER_TYPE` in `routes/phonebookRoutes.js`). Deploy: migrations `2026-10-20-staff-phonebook.sql` then `2026-10-21-staff-phonebook-restore-requests.sql`, upload `routes/phonebookRoutes.js` + `server.js`, new EAS build (expo-contacts). Rules in `routes/phonebookRoutes.js` header (admins `ciadmin@`/`superadmin@sowash.pk` get a read-only Team view of everyone's contacts — `PHONEBOOK_ADMIN_EMAILS`, same list as the chat admins); `phoneKey()` is mirrored in `src/phonebook.ts` — keep in step. Play needs a contacts permission declaration.
 - **Team chat files / Shared Files (2026-10-21):** migration `2026-10-21-staff-files.sql` FIRST, then upload `routes/staffChatRoutes.js` + `services/staffFiles.js` + `services/chatMedia.js`; new EAS build (`expo-document-picker`). Design (sha256-deduped blobs, per-person library entries, signed download links, access = owner or chat participant): `docs/CHANGELOG.md` 2026-10-21.
 - **Weather "No location on file":** needs the site-coordinates change in `customerJobHistoryRoutes.js` uploaded, and

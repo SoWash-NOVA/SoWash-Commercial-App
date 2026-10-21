@@ -31,6 +31,7 @@ import { formatDateTime } from '../src/hooks';
 import {
   FileError,
   StaffFile,
+  displayName,
   fetchFiles,
   formatBytes,
   openFile,
@@ -96,7 +97,7 @@ export default function FilesScreen() {
 
   const open = async (f: StaffFile) => {
     try {
-      await openFile(f.id);
+      await openFile(f.id, f.name);
     } catch (err) {
       Alert.alert('Could not open the file', errorMessage(err));
     }
@@ -186,7 +187,7 @@ export default function FilesScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.name} numberOfLines={2}>
-                {item.name}
+                {displayName(item.name)}
               </Text>
               <Text style={s.meta} numberOfLines={1}>
                 {[formatBytes(item.size), item.mine ? 'You' : item.owner_name, formatDateTime(item.created_at)].filter(Boolean).join(' · ')}

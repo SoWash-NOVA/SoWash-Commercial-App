@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Download, File as FileIcon, FileArchive, FileSpreadsheet, FileText } from 'lucide-react-native';
 import { errorMessage } from '../api/client';
-import { fileExt, formatBytes, openFile } from '../staffFiles';
+import { displayName, fileExt, formatBytes, openFile } from '../staffFiles';
 import { keep } from '../themeEngine';
 import { palette } from '../theme';
 
@@ -39,7 +39,7 @@ export default function FileCard({
     if (!fileId || busy || sending) return;
     setBusy(true);
     try {
-      await openFile(fileId);
+      await openFile(fileId, name);
     } catch (err) {
       Alert.alert('Could not open the file', errorMessage(err));
     } finally {
@@ -62,7 +62,7 @@ export default function FileCard({
       </View>
       <View style={{ flex: 1 }}>
         <Text style={[st.name, { color: mine ? keep('#fff') : palette.ink }]} numberOfLines={2}>
-          {name}
+          {displayName(name)}
         </Text>
         {meta ? <Text style={[st.meta, { color: mine ? 'rgba(255,255,255,0.8)' : palette.muted }]}>{meta}</Text> : null}
       </View>

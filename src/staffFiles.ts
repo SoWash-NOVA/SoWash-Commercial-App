@@ -4,7 +4,8 @@
 // again: sharing from the library sends a message that points at the already-stored file. The server stores
 // identical bytes once, however many people upload them (services/staffFiles.js). Client accounts never use this.
 
-import { Linking } from 'react-native';
+import { Directory, File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { api, SERVER_BASE } from './api/client';
 import type { TeamMessage } from './api/types';
@@ -32,6 +33,16 @@ export class FileError extends Error {}
 export function fileExt(name: string): string {
   const m = /\.([A-Za-z0-9]+)$/.exec(name || '');
   return m ? m[1].toLowerCase() : '';
+}
+
+/** Display name: files stored before the server decoded "%20" still carry it. */
+export function displayName(name: string): string {
+  if (!/%[0-9A-Fa-f]{2}/.test(name || '')) return name;
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
 }
 
 export function formatBytes(n: number): string {
@@ -76,10 +87,46 @@ export async function removeFile(id: number): Promise<void> {
   await api.delete(`staff-chat/files/${id}`);
 }
 
-/** Download / open: the server mints a 10-minute link, the phone's browser / download manager takes it from there. */
-export async function openFile(id: number): Promise<void> {
-  const { data } = await api.get(`staff-chat/files/${id}/link`);
-  await Linking.openURL(`${SERVER_BASE}${data.path}`);
+const MIME: Record<string, string> = {
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  csv: 'text/csv',
+  txt: 'text/plain',
+  rtf: 'application/rtf',
+  odt: 'application/vnd.oasis.opendocument.text',
+  ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  zip: 'application/zip',
+};
+
+/**
+ * Open a file inside the phone's own viewers: download it once into the app cache (a second open is instant),
+ * then hand it to the system "Open with" sheet. No browser involved; the server link is only used for the download.
+ */
+export async function openFile(id: number, name?: string): Promise<void> {
+  const clean = (displayName(name || '') || `file-${id}`).replace(/[\/:*?"<>|]/g, '_');
+  const dir = new Directory(Paths.cache, 'staff-files', String(id));
+  const target = new File(dir, clean);
+  if (!target.exists) {
+    const { data } = await api.get(`staff-chat/files/${id}/link`);
+    dir.create({ intermediates: true, idempotent: true });
+    try {
+      await File.downloadFileAsync(`${SERVER_BASE}${data.path}`, target, { idempotent: true });
+    } catch (err) {
+      try {
+        if (target.exists) target.delete();
+      } catch {
+        /* ignore */
+      }
+      throw err;
+    }
+  }
+  if (!(await Sharing.isAvailableAsync())) throw new FileError('This phone cannot open files from the app.');
+  await Sharing.shareAsync(target.uri, { mimeType: MIME[fileExt(clean)] || '*/*', dialogTitle: clean });
 }
 
 /** Send a library file into a conversation — no upload, the message points at the stored file. */

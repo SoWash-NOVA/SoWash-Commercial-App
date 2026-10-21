@@ -86,7 +86,8 @@
           "color": "#0F766E"
         }
       ],
-      "expo-image"
+      "expo-image",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true
