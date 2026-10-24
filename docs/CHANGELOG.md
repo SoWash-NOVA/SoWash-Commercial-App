@@ -9,6 +9,10 @@ Newest first. Each entry: what changed, in which file(s)/repo, and deploy status
 backend's deploys are **manual** — WinSCP sync + `pm2 restart` on the VPS, nothing here
 auto-deploys, so "fixed" below means "fixed in this working tree," not "live").
 
+### 2026-10-24 — FSR section: Panels cleaned + FSR photo (client report and staff job sheet) (typecheck clean; backend line NOT deployed)
+
+"Panels cleaned" moved out of the facts grid into the FSR card/section (now titled "FIELD SERVICE REPORT (FSR)", was "What the crew found"), as its first row; the report's own photo (`field_service_reports.fsr_photo`, a single path) shows under the rows (tappable, zoomable; staff can send it to a chat like the other photos). Backend: one additive line `fsr.fsr_photo,` after `fsr.total_panels_cleaned,` in the SELECT of `routes/customerJobHistoryRoutes.js` (`GET /:schedule_id/detail`) and `routes/schedulingRoutes.js` (`GET /history`) — extra column only, the web console ignores it. Until those two lines are on the VPS the photo simply does not show. Not shown: `sld_map_image` and the signature (not asked).
+
 ### 2026-10-24 — Date audit: staff dates + "today" on the Pakistan calendar (typecheck clean; NOT run on a device)
 
 Client endpoints send DATE columns via `TO_CHAR(..,'YYYY-MM-DD')` (safe). The staff `GET /schedule/history` (`routes/schedulingRoutes.js`) sends raw `ss.scheduled_date`, which node-pg turns into a JS Date at the SERVER's local midnight, so JSON carries e.g. `2026-08-03T22:00:00.000Z` for 4 Aug on a UTC+2 server — reading its digits showed a day early. `src/hooks.ts`: new `dayKey()` (plain date as is; value with a time part -> its Pakistan calendar day) and `todayKeyPkt()`; `formatDateOnly` and `relativeDay` use them (so "Today/Tomorrow" follow PKT, not the phone's zone), and both Overviews' `dateParts` call `dayKey`. Known, NOT changed (backend): `/customer-portal/history` `scope=upcoming` is `scheduled_date > CURRENT_DATE`, so a visit scheduled TODAY is in the "past" scope and not in Overview's "Next visit"; `CURRENT_DATE` is the DB session zone.

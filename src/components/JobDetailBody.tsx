@@ -120,10 +120,6 @@ function Header({ job }: { job: JobDetail }) {
         <Fact icon={<User size={12} color={palette.mutedLight} />} label="Crew lead" value={job.team_lead_name} />
         <Fact label="Approval" value={titleCase(job.approval_status)} />
         <Fact label="Priority" value={titleCase(job.priority)} />
-        <Fact
-          label="Panels cleaned"
-          value={job.total_panels_cleaned != null && String(job.total_panels_cleaned).trim() !== '' ? String(job.total_panels_cleaned) : null}
-        />
       </View>
 
       {job.reschedule_reason ? (
@@ -373,15 +369,20 @@ const FINDINGS: { key: keyof JobDetail; label: string }[] = [
 ];
 
 function Findings({ job }: { job: JobDetail }) {
-  const rows = FINDINGS.map((f) => ({ ...f, value: job[f.key] })).filter(
-    (r) => r.value !== null && r.value !== undefined && String(r.value).trim() !== '',
-  );
+  const ready = useAfterOpen(160);
+  const panels = job.total_panels_cleaned != null && String(job.total_panels_cleaned).trim() !== '' ? String(job.total_panels_cleaned) : null;
+  // the report's own photo, first in the list
+  const fsrPhoto = photoUrl(job.fsr_photo);
+  const rows = [
+    ...(panels ? [{ key: 'total_panels_cleaned', label: 'Panels cleaned', value: panels }] : []),
+    ...FINDINGS.map((f) => ({ ...f, value: job[f.key] })),
+  ].filter((r) => r.value !== null && r.value !== undefined && String(r.value).trim() !== '');
 
-  if (rows.length === 0 && !job.additional_notes && !job.notes) return null;
+  if (rows.length === 0 && !fsrPhoto && !job.additional_notes && !job.notes) return null;
 
   return (
     <View style={[styles.card, { marginTop: 16, marginBottom: 8 }]}>
-      <Text style={[styles.cardTitle, { marginBottom: 12 }]}>WHAT THE CREW FOUND</Text>
+      <Text style={[styles.cardTitle, { marginBottom: 12 }]}>FIELD SERVICE REPORT (FSR)</Text>
 
       {rows.map((r, i) => (
         <View
@@ -395,6 +396,12 @@ function Findings({ job }: { job: JobDetail }) {
           <Text style={local.factValue}>{String(r.value)}</Text>
         </View>
       ))}
+
+      {fsrPhoto ? (
+        <View style={{ marginTop: 14 }}>
+          <PhotoStrip title="FSR photo" urls={[fsrPhoto]} at={null} ready={ready} />
+        </View>
+      ) : null}
 
       {job.additional_notes ? (
         <View style={local.note}>

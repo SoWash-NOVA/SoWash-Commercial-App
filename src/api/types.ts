@@ -182,6 +182,8 @@ export interface JobDetail extends Omit<JobSummary, 'has_sld_walkthrough'> {
   tbt_photos?: StaffTbtPhoto[];
   /** field_service_reports.total_panels_cleaned (same patch). */
   total_panels_cleaned?: string | number | null;
+  /** field_service_reports.fsr_photo — the crew's photo of the signed report (a single path). Optional until the backend sends it. */
+  fsr_photo?: string | null;
   email: string | null;
   installation_status: string | null;
   approved_at: string | null;
@@ -664,6 +666,8 @@ export interface StaffJob {
   additional_notes: string | null;
   temp_voltage_photos: string | null;
   total_panels_cleaned: string | number | null;
+  /** field_service_reports.fsr_photo — a single path. Optional until the backend sends it. */
+  fsr_photo?: string | null;
   /**
    * Pre-shaped server-side from the raw temp_voltage_photos column above —
    * see the matching comment in sowash-backend routes/schedulingRoutes.js.

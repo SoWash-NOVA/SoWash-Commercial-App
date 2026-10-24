@@ -514,8 +514,15 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
     [job.tbt_photos],
   );
   const attendance = job.attendance ?? [];
+  const fsrUrls = useMemo(() => {
+    const u = photoUrl(job.fsr_photo);
+    return u ? [u] : [];
+  }, [job.fsr_photo]);
 
+  const panelsCleaned =
+    job.total_panels_cleaned != null && String(job.total_panels_cleaned).trim() !== '' ? String(job.total_panels_cleaned) : null;
   const rawFindings: Array<[string, string | null]> = [
+    ['Panels cleaned', panelsCleaned],
     ['Panel damage', job.panel_damage],
     ['Panel brand', job.panel_brand],
     ['Cable condition', job.cable_condition],
@@ -572,10 +579,6 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
               <Fact label="Crew lead" value={job.team_lead_name || '—'} />
               <Fact label="Approval" value={job.approval_status || '—'} />
               <Fact label="Priority" value={job.priority || '—'} />
-              <Fact
-                label="Panels cleaned"
-                value={job.total_panels_cleaned != null && String(job.total_panels_cleaned).trim() !== '' ? String(job.total_panels_cleaned) : '—'}
-              />
             </View>
 
             {pending ? (
@@ -629,15 +632,16 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
               </>
             ) : null}
 
-            {findings.length > 0 ? (
+            {findings.length > 0 || fsrUrls.length > 0 ? (
               <>
-                <Text style={detail.sectionTitle}>WHAT THE CREW FOUND</Text>
+                <Text style={detail.sectionTitle}>FIELD SERVICE REPORT (FSR)</Text>
                 {findings.map(([label, value]) => (
                   <View key={label} style={detail.findingRow}>
                     <Text style={detail.findingLabel}>{label}</Text>
                     <Text style={detail.findingValue}>{value}</Text>
                   </View>
                 ))}
+                <PhotoRow title="FSR photo" urls={fsrUrls} ready={ready} />
               </>
             ) : null}
 
