@@ -38,6 +38,10 @@ import {
 import { Image } from 'expo-image';
 import { ImageOff, RotateCw } from 'lucide-react-native';
 import PhotoViewerModal, { ViewerPhoto } from './PhotoViewerModal';
+import ChatTargetSheet from './ChatTargetSheet';
+import { sharePhotoToConversation } from '../jobShare';
+import { useAccent } from '../theme-context';
+import { thumbUrl } from '../api/client';
 
 const TILE_BG = '#e9eff5';
 
@@ -88,7 +92,7 @@ export function PhotoThumb({
     <View style={{ width, height, borderRadius: radius, overflow: 'hidden', backgroundColor: tc(TILE_BG) }}>
       <Image
         key={attempt}
-        source={{ uri: url }}
+        source={{ uri: thumbUrl(url, width) }}
         style={StyleSheet.absoluteFill}
         contentFit="cover"
         cachePolicy="memory-disk"
@@ -124,6 +128,7 @@ export function PhotoStripList({
   gap = 8,
   radius = 12,
   title = 'Photo',
+  sendable = false,
 }: {
   urls: string[];
   width: number;
@@ -132,7 +137,11 @@ export function PhotoStripList({
   radius?: number;
   /** Shown at the top of the full-screen viewer ("Before", "After"…) with the photo's position. */
   title?: string;
+  /** Staff only: the viewer gets a button that sends the photo to a Team DM / group, and a long-press on a tile does too. */
+  sendable?: boolean;
 }) {
+  const { accent } = useAccent();
+  const [sendUrl, setSendUrl] = useState<string | null>(null);
   const step = width + gap;
   // Tap a tile -> full-screen viewer with pinch / double-tap zoom, swiping through this row's photos.
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
@@ -159,14 +168,32 @@ export function PhotoStripList({
       getItemLayout={(_, index) => ({ length: step, offset: step * index, index })}
       renderItem={({ item, index }) => (
         <View style={{ width: step }}>
-          <TouchableOpacity activeOpacity={0.9} onPress={() => setViewerIndex(index)} accessibilityLabel={`Open ${title} photo ${index + 1}`}>
+          <TouchableOpacity activeOpacity={0.9} onPress={() => setViewerIndex(index)} onLongPress={sendable ? () => setSendUrl(item) : undefined} delayLongPress={350} accessibilityLabel={`Open ${title} photo ${index + 1}`}>
             <PhotoThumb url={item} width={width} height={height} radius={radius} priority={index < 2 ? 'high' : 'low'} />
           </TouchableOpacity>
         </View>
       )}
     />
     {viewerIndex !== null ? (
-      <PhotoViewerModal photos={viewerPhotos} initialIndex={viewerIndex} onClose={() => setViewerIndex(null)} />
+      <PhotoViewerModal
+        photos={viewerPhotos}
+        initialIndex={viewerIndex}
+        onClose={() => setViewerIndex(null)}
+        onSend={sendable ? (p) => setSendUrl(p.url) : undefined}
+      />
+    ) : null}
+    {sendable ? (
+      <ChatTargetSheet
+        visible={sendUrl !== null}
+        title="Send photo to chat"
+        subtitle={title}
+        accent={accent}
+        onClose={() => setSendUrl(null)}
+        onPick={async (conversationId, conversationTitle) => {
+          await sharePhotoToConversation(conversationId, sendUrl as string);
+          return `Photo sent to ${conversationTitle}.`;
+        }}
+      />
     ) : null}
     </>
   );

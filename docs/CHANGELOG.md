@@ -9,6 +9,23 @@ Newest first. Each entry: what changed, in which file(s)/repo, and deploy status
 backend's deploys are **manual** — WinSCP sync + `pm2 restart` on the VPS, nothing here
 auto-deploys, so "fixed" below means "fixed in this working tree," not "live").
 
+### 2026-10-24 — Date audit: staff dates + "today" on the Pakistan calendar (typecheck clean; NOT run on a device)
+
+Client endpoints send DATE columns via `TO_CHAR(..,'YYYY-MM-DD')` (safe). The staff `GET /schedule/history` (`routes/schedulingRoutes.js`) sends raw `ss.scheduled_date`, which node-pg turns into a JS Date at the SERVER's local midnight, so JSON carries e.g. `2026-08-03T22:00:00.000Z` for 4 Aug on a UTC+2 server — reading its digits showed a day early. `src/hooks.ts`: new `dayKey()` (plain date as is; value with a time part -> its Pakistan calendar day) and `todayKeyPkt()`; `formatDateOnly` and `relativeDay` use them (so "Today/Tomorrow" follow PKT, not the phone's zone), and both Overviews' `dateParts` call `dayKey`. Known, NOT changed (backend): `/customer-portal/history` `scope=upcoming` is `scheduled_date > CURRENT_DATE`, so a visit scheduled TODAY is in the "past" scope and not in Overview's "Next visit"; `CURRENT_DATE` is the DB session zone.
+
+### 2026-10-24 — Chat badge updates at once; splash logo size (typecheck clean; NOT run on a device)
+
+`src/hooks.ts`: new `refreshChatUnreadNow()` + a listener set; `useChatUnread`, `useStaffChatUnread` and `useTeamUnread` subscribe, and the three `markRead` functions (client chat, staff Support thread, Team conversation) call it right after the `/read` POST succeeds — so the tab badge drops the moment a chat is opened/read instead of waiting for the poll. Poll interval 60s -> 30s as a fallback. `app.json` splash `imageWidth` 380 -> 220: on Android 12+ the splash image is drawn inside a ~192dp circle, so a wider image was cropped/squeezed; 220 keeps the whole "SC" mark inside it (native change = needs a new build). Not seen on a device.
+
+### 2026-10-24 — Photo thumbnails (`/uploads/...?w=`) (typecheck clean; backend NOT deployed, NOT run on a device)
+
+Backend (`D:\github
+ova\sowash-backend`): new `middleware/uploadThumbs.js`, mounted in `server.js` before the `/uploads` static handler. `?w=<80..1600>` on a jpg/png/webp returns a sharp-resized JPEG (EXIF-rotated, q72), built once and cached in `thumb-cache/w<N>/`; no `?w=` or any failure falls through to the untouched original. Deploy: `npm i sharp` on the VPS, upload `middleware/uploadThumbs.js`, add the one `require("./middleware/uploadThumbs"),` line to the `/uploads` handler in the LIVE `server.js` (do not upload the local server.js), `pm2 restart`. App: `thumbUrl(url, width)` in `src/api/client.ts` (buckets 240/480/800/1200 px); `PhotoThumb` uses it, the full-screen viewer still loads the original. Safe before the backend is deployed (static ignores the query).
+
+### 2026-10-24 — Staff: send a visit / its photos to a Team chat; Panels cleaned on the staff job sheet (typecheck clean; NOT run on a device)
+
+Office Jobs (`app/staff/jobs.tsx`): long-press a visit → pop-up "Send to chat" / "View details"; the job sheet header has a send-to-chat button; a "Panels cleaned" fact was added (`—` when empty — still needs the backend to send `total_panels_cleaned`). Picking uses `ChatTargetSheet` (DM or group); the visit goes as a plain text summary (`src/jobShare.ts`). Photos (TBT / Before / After rows in the sheet, `PhotoStripList sendable`): the full-screen viewer has a send button and long-pressing a tile also sends — the photo is downloaded to cache and posted as a normal photo message (`photo` field). No clipboard copy/paste (would need `expo-clipboard` = new native build); "send to chat" replaces it. JS-only, no backend change.
+
 ### 2026-10-21 — Change password (clients + office staff) (typecheck clean; NOT run on a device or against the DB)
 
 New screen `app/change-password.tsx` (current / new / confirm, show-hide, min 8 chars), linked from Account on both sides (`app/(tabs)/profile.tsx` row, `app/staff/account.tsx` card). `app/_layout.tsx` has `SHARED_STACK_SEGMENTS` so neither role guard bounces it. Backend: `POST /api/customer-portal/auth/change-password` in `routes/portalAuthRoutes.js` accepts a `portal` OR `office_portal` token, user id from the token, checks the current password with bcrypt, stores bcrypt cost 10 like the web console, refuses demo accounts, throttles wrong current-password guesses (5 per 15 min per user, in memory), logs `PASSWORD_CHANGED_BY_USER`. No SQL. Existing 30-day sessions stay valid after a change (stateless JWT). JS-only on the app side; backend needs `routes/portalAuthRoutes.js` uploaded + restart.

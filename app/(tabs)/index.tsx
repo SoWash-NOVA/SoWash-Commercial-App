@@ -93,7 +93,7 @@ import { openJobActions } from '../../src/components/JobActions';
 import { tc } from '../../src/themeEngine';
 import { useAuth } from '../../src/auth/AuthContext';
 import { useSiteContext } from '../../src/site-context';
-import { useJobs, useStats, useUnreadCount, formatDateOnly, relativeDay } from '../../src/hooks';
+import { useJobs, useStats, useUnreadCount, dayKey, formatDateOnly, relativeDay } from '../../src/hooks';
 import { SiteSwitcher } from '../../src/components/SiteSwitcher';
 import PageHeader from '../../src/components/PageHeader';
 
@@ -231,7 +231,7 @@ function greeting(d = new Date()) {
 
 /** "2026-10-07" → { day: '7', month: 'OCT' } from the string parts (never through a Date — see CLAUDE.md §3). */
 function dateParts(value: string | null | undefined): { day: string; month: string } | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? ''));
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dayKey(value) ?? '');
   if (!m) return null;
   const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
   return { day: String(parseInt(m[3], 10)), month: months[parseInt(m[2], 10) - 1] };

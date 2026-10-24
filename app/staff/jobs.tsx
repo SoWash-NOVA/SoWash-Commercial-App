@@ -46,6 +46,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
+  MessageSquarePlus,
   Search,
   UserCheck,
   Wrench,
@@ -58,6 +59,8 @@ import { useStaffJobs, formatDateOnly, formatDateTime, statusMeta, stageIndex, S
 import { photoUrl, photoUrls } from '../../src/api/client';
 import { StaffJob } from '../../src/api/types';
 import PageHeader from '../../src/components/PageHeader';
+import ChatTargetSheet from '../../src/components/ChatTargetSheet';
+import { shareJobToConversation } from '../../src/jobShare';
 import { PhotoStripList, PhotoStripSkeleton, PhotoThumb, useAfterOpen } from '../../src/components/PhotoStripList';
 
 const isFinished = (status: string | null | undefined) =>
@@ -241,6 +244,9 @@ function ClientJobsList() {
   const [search, setSearch] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [openJob, setOpenJob] = useState<StaffJob | null>(null);
+  // long-press pop-up: the visit it was opened for, and the one being sent to a chat
+  const [menuJob, setMenuJob] = useState<StaffJob | null>(null);
+  const [shareJob, setShareJob] = useState<StaffJob | null>(null);
 
   const { data, loading, error, refresh } = useStaffJobs({
     clientId: selectedClient?.client_id ?? null,
@@ -304,7 +310,7 @@ function ClientJobsList() {
             const meta = statusMeta(item.status);
             const pending = isPendingApproval(item);
             return (
-              <TouchableOpacity style={s.card} activeOpacity={0.85} onPress={() => setOpenJob(item)}>
+              <TouchableOpacity style={s.card} activeOpacity={0.85} onPress={() => setOpenJob(item)} onLongPress={() => setMenuJob(item)} delayLongPress={350}>
                 <View style={s.cardTop}>
                   <Text style={s.siteName} numberOfLines={1}>
                     {item.site_name || 'Site'}
@@ -344,7 +350,67 @@ function ClientJobsList() {
           <JobDetailSheet job={openJob} onClose={() => setOpenJob(null)} />
         </DetailErrorBoundary>
       ) : null}
+
+      {menuJob ? (
+        <JobMenu
+          job={menuJob}
+          onClose={() => setMenuJob(null)}
+          onShare={() => {
+            setShareJob(menuJob);
+            setMenuJob(null);
+          }}
+          onOpen={() => {
+            setOpenJob(menuJob);
+            setMenuJob(null);
+          }}
+        />
+      ) : null}
+
+      <JobShareSheet job={shareJob} onClose={() => setShareJob(null)} />
     </View>
+  );
+}
+
+/** Sends a visit summary into a Team DM / group. */
+function JobShareSheet({ job, onClose }: { job: StaffJob | null; onClose: () => void }) {
+  const { accent } = useAccent();
+  return (
+    <ChatTargetSheet
+      visible={!!job}
+      title="Send visit to chat"
+      subtitle={job?.site_name || undefined}
+      accent={accent}
+      onClose={onClose}
+      onPick={async (conversationId, conversationTitle) => {
+        if (job) await shareJobToConversation(conversationId, job);
+        return `Visit sent to ${conversationTitle}.`;
+      }}
+    />
+  );
+}
+
+/** Long-press pop-up on a visit row: Send to chat / View details. */
+function JobMenu({ job, onClose, onShare, onOpen }: { job: StaffJob; onClose: () => void; onShare: () => void; onOpen: () => void }) {
+  const { accent } = useAccent();
+  return (
+    <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
+      <Pressable style={menu.backdrop} onPress={onClose}>
+        <View style={menu.box}>
+          <Text style={menu.title} numberOfLines={2}>
+            {job.site_name || 'Visit'}
+          </Text>
+          <Text style={menu.sub}>{formatDateOnly(job.scheduled_date)}</Text>
+          <TouchableOpacity style={menu.item} activeOpacity={0.8} onPress={onShare}>
+            <MessageSquarePlus size={19} color={accent} />
+            <Text style={menu.itemText}>Send to chat</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={menu.item} activeOpacity={0.8} onPress={onOpen}>
+            <CalendarDays size={19} color={accent} />
+            <Text style={menu.itemText}>View details</Text>
+          </TouchableOpacity>
+        </View>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -416,7 +482,7 @@ function PhotoRow({ title, urls, ready }: { title: string; urls: string[]; ready
         {title.toUpperCase()} · {urls.length}
       </Text>
       {ready ? (
-        <PhotoStripList urls={urls} width={PHOTO_W} height={PHOTO_H} gap={8} radius={10} title={title} />
+        <PhotoStripList urls={urls} width={PHOTO_W} height={PHOTO_H} gap={8} radius={10} title={title} sendable />
       ) : (
         <PhotoStripSkeleton width={PHOTO_W} height={PHOTO_H} radius={10} />
       )}
@@ -428,6 +494,7 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
   const { accent } = useAccent();
   const meta = statusMeta(job.status);
   const pending = isPendingApproval(job);
+  const [sharing, setSharing] = useState(false);
   // The popup opens instantly with its text; the photos mount once the slide-in has finished.
   const ready = useAfterOpen();
 
@@ -484,10 +551,14 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
                 {job.client_name || ''}
               </Text>
             </View>
+            <TouchableOpacity onPress={() => setSharing(true)} hitSlop={10} style={detail.close} accessibilityLabel="Send visit to chat">
+              <MessageSquarePlus size={18} color={accent} />
+            </TouchableOpacity>
             <TouchableOpacity onPress={onClose} hitSlop={10} style={detail.close}>
               <X size={18} color={palette.inkSoft} />
             </TouchableOpacity>
           </View>
+          <JobShareSheet job={sharing ? job : null} onClose={() => setSharing(false)} />
 
           <ScrollView
             contentContainerStyle={{ padding: 18, paddingBottom: 32 }}
@@ -501,6 +572,10 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
               <Fact label="Crew lead" value={job.team_lead_name || '—'} />
               <Fact label="Approval" value={job.approval_status || '—'} />
               <Fact label="Priority" value={job.priority || '—'} />
+              <Fact
+                label="Panels cleaned"
+                value={job.total_panels_cleaned != null && String(job.total_panels_cleaned).trim() !== '' ? String(job.total_panels_cleaned) : '—'}
+              />
             </View>
 
             {pending ? (
@@ -668,6 +743,15 @@ const s = StyleSheet.create({
   emptyCard: { alignItems: 'center', gap: 6, marginTop: 60, paddingHorizontal: 32 },
   emptyTitle: { fontSize: 15.5, fontWeight: '800', color: palette.ink, marginTop: 6 },
   emptyBody: { fontSize: 13, color: palette.muted, textAlign: 'center', lineHeight: 19 },
+});
+
+const menu = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(6,14,24,0.55)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28 },
+  box: { width: '100%', maxWidth: 360, backgroundColor: palette.surface, borderRadius: 20, padding: 16 },
+  title: { fontSize: 16, fontWeight: '900', color: palette.ink },
+  sub: { fontSize: 12.5, fontWeight: '600', color: palette.muted, marginTop: 2, marginBottom: 6 },
+  item: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13 },
+  itemText: { fontSize: 15, fontWeight: '700', color: palette.ink },
 });
 
 const detail = StyleSheet.create({

@@ -401,12 +401,42 @@ export function stageIndex(job: {
 
 const PKT = 'Asia/Karachi';
 
-/** A DATE column ("2026-08-04" or an ISO string) → "4 Aug 2026". No TZ maths. */
+const PKT_OFFSET_MS = 5 * 60 * 60 * 1000; // Pakistan: UTC+5, no DST
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * The calendar day of a DATE value as "YYYY-MM-DD", or null.
+ *
+ * Client endpoints send DATE columns already as "2026-08-04" (TO_CHAR) — used as is. The staff
+ * /schedule/history sends the raw column, which node-postgres turns into a JS Date at the SERVER's local
+ * midnight and JSON writes as a UTC instant ("2026-08-03T22:00:00.000Z" for 4 Aug on a UTC+2 server). Reading
+ * the digits of that string would show 3 Aug, so a value with a time part is converted to its Pakistan
+ * calendar day instead (the server's midnight is always within hours of PKT midnight, so this lands on the
+ * intended day for any server zone from UTC to UTC+5).
+ */
+export function dayKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const str = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  if (!/^\d{4}-\d{2}-\d{2}[T ]/.test(str)) return null;
+  const t = new Date(str).getTime();
+  if (Number.isNaN(t)) return /^\d{4}-\d{2}-\d{2}/.exec(str)?.[0] ?? null;
+  const p = new Date(t + PKT_OFFSET_MS);
+  return `${p.getUTCFullYear()}-${pad2(p.getUTCMonth() + 1)}-${pad2(p.getUTCDate())}`;
+}
+
+/** Today in Pakistan as "YYYY-MM-DD" (the business's calendar, not the phone's). */
+export function todayKeyPkt(): string {
+  const p = new Date(Date.now() + PKT_OFFSET_MS);
+  return `${p.getUTCFullYear()}-${pad2(p.getUTCMonth() + 1)}-${pad2(p.getUTCDate())}`;
+}
+
+/** A DATE column ("2026-08-04" or the staff API's ISO instant) → "4 Aug 2026". No device-timezone maths. */
 export function formatDateOnly(value: string | null | undefined): string {
-  if (!value) return '—';
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value));
-  if (!m) return '—';
-  const [, y, mo, d] = m;
+  const key = dayKey(value);
+  if (!key) return '—';
+  const [y, mo, d] = key.split('-');
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${parseInt(d, 10)} ${months[parseInt(mo, 10) - 1]} ${y}`;
 }
@@ -437,18 +467,15 @@ export function formatTime(value: string | null | undefined): string {
   });
 }
 
-/** "Today" / "Tomorrow" / "In 3 days" / "12 days ago" for a DATE column. */
+/** "Today" / "Tomorrow" / "In 3 days" / "12 days ago" for a DATE column (days counted on the Pakistan calendar). */
 export function relativeDay(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value));
-  if (!m) return null;
+  const key = dayKey(value);
+  if (!key) return null;
 
-  // Compare calendar days, not instants — the value has no time component.
-  const [, y, mo, d] = m;
-  const target = Date.UTC(parseInt(y, 10), parseInt(mo, 10) - 1, parseInt(d, 10));
-  const now = new Date();
-  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-  const days = Math.round((target - today) / 86_400_000);
+  // Compare calendar days, not instants — a DATE has no time component.
+  const [y, mo, d] = key.split('-').map(Number);
+  const [ty, tmo, td] = todayKeyPkt().split('-').map(Number);
+  const days = Math.round((Date.UTC(y, mo - 1, d) - Date.UTC(ty, tmo - 1, td)) / 86_400_000);
 
   if (days === 0) return 'Today';
   if (days === 1) return 'Tomorrow';
@@ -686,7 +713,20 @@ const CHAT_POLL_MS = 5_000;
 /** Messages fetched when a chat opens, and per "scroll up for older" page. */
 const CHAT_PAGE = 40;
 /** How often to refresh the tab-bar unread badge from anywhere in the app. */
-const CHAT_UNREAD_POLL_MS = 60_000;
+const CHAT_UNREAD_POLL_MS = 30_000;
+
+// "Re-count the chat badges NOW". A chat screen calls this right after it marks a conversation read, so the
+// tab badge drops at once instead of waiting for the next poll. Every unread hook below subscribes.
+const unreadListeners = new Set<() => void>();
+export function refreshChatUnreadNow() {
+  unreadListeners.forEach((l) => l());
+}
+function subscribeUnread(listener: () => void): () => void {
+  unreadListeners.add(listener);
+  return () => {
+    unreadListeners.delete(listener);
+  };
+}
 
 /** A photo picked with expo-image-picker, reduced to what upload needs. */
 export interface ChatPhotoInput {
@@ -781,6 +821,7 @@ export function useChat(myUserId?: number | null) {
   const markRead = useCallback(async () => {
     try {
       await api.post('customer-portal/chat/read', {});
+      refreshChatUnreadNow();
     } catch {
       // The badge simply stays up until the next attempt.
     }
@@ -1132,11 +1173,13 @@ export function useChatUnread() {
     });
 
     const offPush = subscribePush(refresh);
+    const offUnread = subscribeUnread(refresh);
 
     return () => {
       clearInterval(timer);
       appStateSub.remove();
       offPush();
+      offUnread();
     };
   }, [refresh]);
 
@@ -1252,9 +1295,12 @@ export function useStaffChatUnread() {
       if (next === 'active') refresh();
     });
 
+    const offUnread = subscribeUnread(refresh);
+
     return () => {
       clearInterval(timer);
       appStateSub.remove();
+      offUnread();
     };
   }, [refresh]);
 
@@ -1309,6 +1355,7 @@ export function useStaffChatThread(threadId: number | null, myUserId?: number | 
     if (!threadId) return;
     try {
       await api.post(`commercial-chat/threads/${threadId}/read`, {});
+      refreshChatUnreadNow();
     } catch {
       // The badge simply stays up until the next attempt.
     }
@@ -1762,11 +1809,13 @@ export function useTeamUnread() {
     // A socket delivery means something changed right now — no reason to
     // wait for the next 60s tick.
     const offSocket = subscribeTeamSocket(() => refresh());
+    const offUnread = subscribeUnread(refresh);
 
     return () => {
       clearInterval(timer);
       appStateSub.remove();
       offSocket();
+      offUnread();
     };
   }, [refresh]);
 
@@ -1867,6 +1916,7 @@ export function useTeamConversation(conversationId: number | null, myUserId: num
     if (!conversationId) return;
     try {
       await api.post(`staff-chat/conversations/${conversationId}/read`, {});
+      refreshChatUnreadNow();
     } catch {
       // The badge simply stays up until the next attempt.
     }

@@ -9,7 +9,7 @@ import React, { useRef, useState } from 'react';
 import { FlatList, Modal, StatusBar, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft } from 'lucide-react-native';
+import { ChevronLeft, Send } from 'lucide-react-native';
 import ZoomableImage from './ZoomableImage';
 import { formatDateTime } from '../hooks';
 
@@ -25,10 +25,13 @@ export default function PhotoViewerModal({
   photos,
   initialIndex,
   onClose,
+  onSend,
 }: {
   photos: ViewerPhoto[];
   initialIndex: number;
   onClose: () => void;
+  /** Staff only: shows a "send to chat" button for the photo on screen. */
+  onSend?: (photo: ViewerPhoto) => void;
 }) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -58,6 +61,11 @@ export default function PhotoViewerModal({
             <Text style={st.count}>
               {index + 1} / {photos.length}
             </Text>
+          ) : null}
+          {onSend && current ? (
+            <TouchableOpacity onPress={() => onSend(current)} style={st.back} hitSlop={10} accessibilityLabel="Send photo to chat">
+              <Send size={22} color="#fff" />
+            </TouchableOpacity>
           ) : null}
         </View>
 

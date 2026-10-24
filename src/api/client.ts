@@ -13,6 +13,7 @@
 // /api/customer-portal) and routes/portalAuthRoutes.js (login).
 
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { PixelRatio } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 import { dataCache } from '../dataCache';
@@ -133,6 +134,19 @@ export function photoUrl(path: string | null | undefined): string | null {
   if (!s.includes('/')) return `${SERVER_BASE}/uploads/${s}`;
 
   return `${SERVER_BASE}${s.startsWith('/') ? '' : '/'}${s}`;
+}
+
+/**
+ * A small server-resized copy of one of our /uploads images (see the backend's middleware/uploadThumbs.js).
+ * Use it for tiles and previews; keep the original URL for the full-screen viewer. Any other URL is returned
+ * unchanged, and a backend that doesn't resize yet just ignores the `?w=` and sends the original.
+ */
+export function thumbUrl(url: string, displayWidth: number): string {
+  if (!url.startsWith(`${SERVER_BASE}/uploads/`) || url.includes('?') || !/\.(jpe?g|png|webp)$/i.test(url)) return url;
+  const px = displayWidth * PixelRatio.get();
+  // a few fixed sizes so the server cache and the app's image cache are shared between screens
+  const w = px <= 240 ? 240 : px <= 480 ? 480 : px <= 800 ? 800 : 1200;
+  return `${url}?w=${w}`;
 }
 
 /** parsePhotos + photoUrl in one step, dropping anything unresolvable. */
