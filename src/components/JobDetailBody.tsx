@@ -267,51 +267,13 @@ function Photos({ job }: { job: JobDetail }) {
 
 /* ── attendance ──────────────────────────────────────────────────────── */
 
-/** "2h 35m" between two timestamps, or null. */
-function duration(from: string | null, to: string | null): string | null {
-  if (!from || !to) return null;
-  const ms = new Date(to).getTime() - new Date(from).getTime();
-  if (!Number.isFinite(ms) || ms <= 0) return null;
-  const m = Math.round(ms / 60000);
-  const h = Math.floor(m / 60);
-  return h > 0 ? `${h}h ${m % 60}m` : `${m}m`;
-}
-
 function Attendance({ records }: { records: StaffAttendanceRecord[] | undefined }) {
-  const ready = useAfterOpen(160);
   if (!records || records.length === 0) return null;
+  // The client only learns THAT the team's attendance was marked — no names, times or pictures.
   return (
-    <View style={[styles.card, { marginTop: 16 }]}>
-      <Text style={[styles.cardTitle, { marginBottom: 10 }]}>ATTENDANCE · {records.length} ON SITE</Text>
-      {records.map((a, i) => {
-        const inPhoto = photoUrl(a.clock_in_image_url);
-        const outPhoto = photoUrl(a.clock_out_image_url);
-        const worked = duration(a.clock_in_at, a.clock_out_at);
-        return (
-          <View key={`${a.fo_name}-${i}`} style={[local.attRow, i === records.length - 1 && { borderBottomWidth: 0 }]}>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <View style={local.attTop}>
-                <UserCheck size={14} color={palette.muted} />
-                <Text style={local.attName} numberOfLines={1}>
-                  {a.fo_name}
-                </Text>
-                {a.status ? <Text style={local.attStatus}>{titleCase(a.status)}</Text> : null}
-              </View>
-              <Text style={local.attTimes}>
-                In {formatDateTime(a.clock_in_at)}
-                {a.clock_out_at ? `  ·  Out ${formatDateTime(a.clock_out_at)}` : '  ·  still on site'}
-              </Text>
-              {worked ? <Text style={local.attWorked}>On site {worked}</Text> : null}
-            </View>
-            {ready && (inPhoto || outPhoto) ? (
-              <View style={{ flexDirection: 'row', gap: 6 }}>
-                {inPhoto ? <PhotoThumb url={inPhoto} width={40} height={40} radius={10} priority="low" /> : null}
-                {outPhoto ? <PhotoThumb url={outPhoto} width={40} height={40} radius={10} priority="low" /> : null}
-              </View>
-            ) : null}
-          </View>
-        );
-      })}
+    <View style={[styles.card, { marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 8 }]}>
+      <UserCheck size={16} color={palette.muted} />
+      <Text style={local.attName}>Team attendance marked</Text>
     </View>
   );
 }

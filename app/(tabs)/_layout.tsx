@@ -34,8 +34,9 @@ import { palette } from '../../src/theme';
 import { HEADER_GRADIENT } from '../../src/brand';
 import { SiteProvider } from '../../src/site-context';
 import { JobActionsHost } from '../../src/components/JobActions';
-import { useChatUnread } from '../../src/hooks';
+import { useChatUnread, prefetchClientChat } from '../../src/hooks';
 import { useChatOpen } from '../../src/chat-focus';
+import { startTeamSocket, stopTeamSocket } from '../../src/teamChatSocket';
 
 const IDLE = palette.mutedLight;
 const CIRCLE = 42;
@@ -274,6 +275,13 @@ function CustomTabBar({
 }
 
 export default function TabsLayout() {
+  // Live Support chat: a listen-only socket that pings the moment staff reply / read / react (polling stays as backup).
+  useEffect(() => {
+    startTeamSocket();
+    // Warm the Support chat so its first open is instant.
+    void prefetchClientChat();
+    return () => stopTeamSocket();
+  }, []);
   return (
     <SiteProvider>
       <Tabs

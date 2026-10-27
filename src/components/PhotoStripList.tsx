@@ -28,6 +28,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { tc } from '../themeEngine';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   InteractionManager,
   StyleSheet,
@@ -39,7 +40,7 @@ import { Image } from 'expo-image';
 import { ImageOff, RotateCw } from 'lucide-react-native';
 import PhotoViewerModal, { ViewerPhoto } from './PhotoViewerModal';
 import ChatTargetSheet from './ChatTargetSheet';
-import { sharePhotoToConversation } from '../jobShare';
+import { sharePhotoToConversation, sharePhotoExternally } from '../jobShare';
 import { useAccent } from '../theme-context';
 import { thumbUrl } from '../api/client';
 
@@ -180,6 +181,7 @@ export function PhotoStripList({
         initialIndex={viewerIndex}
         onClose={() => setViewerIndex(null)}
         onSend={sendable ? (p) => setSendUrl(p.url) : undefined}
+        onShare={sendable ? (p) => void sharePhotoExternally(p.url).catch((e) => Alert.alert('Could not share', e?.message || 'Try again.')) : undefined}
       />
     ) : null}
     {sendable ? (

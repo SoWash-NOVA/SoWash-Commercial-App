@@ -4,6 +4,7 @@
 // The picking UI is ChatTargetSheet. Staff only — client accounts have no Team chats.
 
 import { Directory, File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { api } from './api/client';
 import { formatDateOnly, statusMeta } from './hooks';
 import type { StaffJob } from './api/types';
@@ -53,4 +54,14 @@ export async function sharePhotoToConversation(conversationId: number, url: stri
       /* ignore */
     }
   }
+}
+
+/** Download a photo and open the phone's share sheet (WhatsApp, email, …). Throws on failure. */
+export async function sharePhotoExternally(url: string): Promise<void> {
+  if (!(await Sharing.isAvailableAsync())) throw new Error('This phone cannot share files from the app.');
+  const dir = new Directory(Paths.cache, 'job-share');
+  dir.create({ intermediates: true, idempotent: true });
+  const target = new File(dir, `photo-${Date.now()}.jpg`);
+  await File.downloadFileAsync(url.split('?')[0], target, { idempotent: true });
+  await Sharing.shareAsync(target.uri, { mimeType: 'image/jpeg', dialogTitle: 'Share photo' });
 }

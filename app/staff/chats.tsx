@@ -54,7 +54,8 @@ import {
 import { Image } from 'expo-image';
 import ChatAttachment, { ChatPhoto } from '../../src/components/ChatAttachment';
 import ZoomableImage from '../../src/components/ZoomableImage';
-import { CameraPillButton } from '../../src/camera-capture';
+import { CameraPillButton, openCameraCapture } from '../../src/camera-capture';
+import { pickChatPhoto } from '../../src/photoPicker';
 import { DueBadge, DueBanner, TIMELINES, timelineMinutes, useNow } from '../../src/chatDue';
 import { isChatAdmin } from '../../src/chatAdmins';
 import { useVoiceHold, VoiceMicButton, VoiceRecordingBar } from '../../src/voiceRecorder';
@@ -106,7 +107,7 @@ import { palette } from '../../src/theme';
 import { keep, ttc } from '../../src/themeEngine';
 import { useAccent } from '../../src/theme-context';
 import { photoUrl, errorMessage } from '../../src/api/client';
-import { subscribeTeamSocket } from '../../src/teamChatSocket';
+import { subscribeTeamSocket, subscribeSupportSocket } from '../../src/teamChatSocket';
 import {
   useStaffChatThreads,
   useStaffChatThread,
@@ -114,6 +115,7 @@ import {
   useStaffChatAgents,
   useStaffDirectory,
   useTeamConversations,
+  subscribeUnread,
   useTeamConversation,
   startTeamDm,
   createTeamGroup,
@@ -658,7 +660,17 @@ function ThreadList({
       const timer = setInterval(() => {
         if (AppState.currentState === 'active') refresh();
       }, INBOX_POLL_MS);
-      return () => clearInterval(timer);
+      const offUnread = subscribeUnread(() => refresh());
+      // Live: a client sent / read / reacted, or a colleague replied / assigned / closed.
+      const offSupport = subscribeSupportSocket((e) => {
+        if (e.event !== 'typing') refresh();
+      });
+      refresh();
+      return () => {
+        clearInterval(timer);
+        offUnread();
+        offSupport();
+      };
     }, [refresh]),
   );
 
@@ -858,9 +870,13 @@ function TeamList({
       // unread counts are stale right now — no reason to wait for the next
       // poll tick when we already know something changed.
       const offSocket = subscribeTeamSocket(() => refresh());
+      // A chat was just marked read → re-count this list's badges now, not on the next poll.
+      const offUnread = subscribeUnread(() => refresh());
+      refresh();
       return () => {
         clearInterval(timer);
         offSocket();
+        offUnread();
       };
     }, [refresh]),
   );
@@ -2802,9 +2818,18 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
       setFileBusy(false);
     }
   };
+  // One attach button for everything: pictures/video (camera or gallery) and documents.
   const openFileMenu = () =>
-    Alert.alert('Send a file', 'PDF, Word, Excel, PowerPoint, CSV, text or ZIP — up to 25 MB.', [
-      { text: 'Upload from phone', onPress: () => void uploadAndSendFile() },
+    Alert.alert('Attach', 'Documents: PDF, Word, Excel, PowerPoint, CSV, text or ZIP — up to 25 MB.', [
+      { text: 'Camera (photo / video)', onPress: () => openCameraCapture(sendMedia, { onLibrary: setPhoto }) },
+      {
+        text: 'Picture from Gallery',
+        onPress: async () => {
+          const p = await pickChatPhoto('library');
+          if (p) setPhoto(p);
+        },
+      },
+      { text: 'Document from phone', onPress: () => void uploadAndSendFile() },
       { text: 'Choose from Shared Files', onPress: () => setShowFilePicker(true) },
       { text: 'Cancel', style: 'cancel' },
     ]);
@@ -3361,8 +3386,6 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
                 void sendLibraryFile(f.id);
               }}
             />
-            {/* WhatsApp-style camera: tap = open camera (gallery button inside it), hold = record video straight away. */}
-            <CameraPillButton onPicked={sendMedia} onLibrary={setPhoto} style={s.pillIcon} color={palette.muted} />
           </View>
           )}
           {canSend && !voice.recording ? (

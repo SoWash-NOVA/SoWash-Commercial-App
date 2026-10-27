@@ -59,7 +59,7 @@ import {
   TeamUnreadResponse,
   UnreadResponse,
 } from './api/types';
-import { subscribeTeamSocket, sendTyping } from './teamChatSocket';
+import { subscribeTeamSocket, subscribeSupportSocket, sendTyping } from './teamChatSocket';
 import { dataCache } from './dataCache';
 
 interface AsyncState<T> {
@@ -721,7 +721,7 @@ const unreadListeners = new Set<() => void>();
 export function refreshChatUnreadNow() {
   unreadListeners.forEach((l) => l());
 }
-function subscribeUnread(listener: () => void): () => void {
+export function subscribeUnread(listener: () => void): () => void {
   unreadListeners.add(listener);
   return () => {
     unreadListeners.delete(listener);
@@ -757,6 +757,26 @@ interface ClientChatSnapshot {
   messages: ChatMessage[];
   reactions: TeamReaction[];
   receipts: ChatReceipts;
+}
+
+/**
+ * Warm the client Support chat's cache in the background (called once the client tabs are up), so the first time the
+ * chat is opened it shows at once instead of waiting on the network. Silent; the chat itself refreshes on open anyway.
+ */
+export async function prefetchClientChat(): Promise<void> {
+  try {
+    if (dataCache.get(CLIENT_CHAT_CACHE_KEY)) return;
+    const { data } = await api.get<ChatResponse>('customer-portal/chat');
+    if (dataCache.get(CLIENT_CHAT_CACHE_KEY)) return; // the chat opened meanwhile and stored its own, newer copy
+    dataCache.set(CLIENT_CHAT_CACHE_KEY, {
+      thread: data?.thread ?? null,
+      messages: data?.messages ?? [],
+      reactions: data?.reactions ?? [],
+      receipts: data?.receipts ?? { agent_delivered_at: null, agent_seen_at: null },
+    } satisfies ClientChatSnapshot);
+  } catch {
+    // Not worth surfacing - the chat loads normally when opened.
+  }
 }
 
 /**
@@ -838,7 +858,8 @@ export function useChat(myUserId?: number | null) {
       adoptReceipts(data?.receipts);
       rememberLast(list);
       setError(null);
-      if ((data?.unread ?? 0) > 0) markRead();
+      // Opening the chat clears the badge, whether or not this response reports a count.
+      markRead();
     } catch (err) {
       setError(errorMessage(err, 'Could not open support chat.'));
     } finally {
@@ -1043,11 +1064,17 @@ export function useChat(myUserId?: number | null) {
       }, 2000);
 
       const offPush = subscribePush(poll);
+      // Live: the server pings the moment staff reply / read / react / type, so no waiting for the 5s tick.
+      const offSupport = subscribeSupportSocket((e) => {
+        if (e.event === 'typing') pollTyping();
+        else poll();
+      });
 
       return () => {
         clearInterval(timer);
         clearInterval(typingTimer);
         offPush();
+        offSupport();
         stopTyping();
         setAgentTyping(false);
         setAgentTypingName(null);
@@ -1174,12 +1201,16 @@ export function useChatUnread() {
 
     const offPush = subscribePush(refresh);
     const offUnread = subscribeUnread(refresh);
+    const offSupport = subscribeSupportSocket((e) => {
+      if (e.event !== 'typing') refresh();
+    });
 
     return () => {
       clearInterval(timer);
       appStateSub.remove();
       offPush();
       offUnread();
+      offSupport();
     };
   }, [refresh]);
 
@@ -1296,11 +1327,15 @@ export function useStaffChatUnread() {
     });
 
     const offUnread = subscribeUnread(refresh);
+    const offSupport = subscribeSupportSocket((e) => {
+      if (e.event !== 'typing') refresh();
+    });
 
     return () => {
       clearInterval(timer);
       appStateSub.remove();
       offUnread();
+      offSupport();
     };
   }, [refresh]);
 
@@ -1608,10 +1643,17 @@ export function useStaffChatThread(threadId: number | null, myUserId?: number | 
       const typingTimer = setInterval(() => {
         if (AppState.currentState === 'active') pollTyping();
       }, 2000);
+      // Live: the server pings the moment the client sends / reads / reacts / types.
+      const offSupport = subscribeSupportSocket((e) => {
+        if (e.thread_id != null && e.thread_id !== threadId) return;
+        if (e.event === 'typing') pollTyping();
+        else poll();
+      });
 
       return () => {
         clearInterval(timer);
         clearInterval(typingTimer);
+        offSupport();
         stopTyping();
         setCustomerTyping(false);
         setAgentTypingName(null);
@@ -1934,6 +1976,8 @@ export function useTeamConversation(conversationId: number | null, myUserId: num
     // spinner for however long that round trip takes in the meantime.
     const cached = teamConversationCache.get(conversationId);
     lastIdRef.current = 0;
+    // Opening a chat clears its unread badge at once — no scrolling to the bottom needed.
+    markRead();
     if (cached) {
       setConversation(cached.conversation);
       adoptReactions(cached.conversation?.reactions);

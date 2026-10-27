@@ -58,7 +58,11 @@ export async function pickDocument(): Promise<PickedDocument | null> {
   if (res.canceled || !res.assets?.length) return null;
   const a = res.assets[0];
   const name = a.name || 'file';
-  if (!ALLOWED.includes(fileExt(name))) {
+  const ext = fileExt(name);
+  if (/^image\//.test(a.mimeType || '') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp'].includes(ext)) {
+    throw new FileError('You have selected a picture, not a document (PDF, Word, Excel, etc.). To send a picture, use "Camera" or "Picture from Gallery" in the attach menu.');
+  }
+  if (!ALLOWED.includes(ext)) {
     throw new FileError('That file type is not allowed. Use PDF, Word, Excel, PowerPoint, CSV, text or ZIP.');
   }
   if (a.size != null && a.size > MAX_FILE_BYTES) {

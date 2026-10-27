@@ -63,7 +63,11 @@ export function useChatScroll<T>(
     if (!enabled) return;
     // For the first moments after opening, ALWAYS chase the end: photos/variable-height bubbles keep
     // growing the list as they lay out, and the newest message must stay in view until it settles.
-    const settling = mountedAt.current > 0 && Date.now() - mountedAt.current < 1800;
+    // ...but only until the reader touches the list: after that the list never moves by itself unless they are at the bottom.
+    // Rows above the viewport keep re-measuring (photos, long bubbles) well after the first 1.8s, and each re-measure
+    // would leave the reader a little ABOVE the newest message. So until they touch the list it simply stays pinned
+    // to the end; after the first drag it only follows if they are at the bottom.
+    const settling = mountedAt.current > 0 && !userDragged.current;
     if (!settling && !nearBottom.current) return; // reading older messages — stay where the reader is
     if (!settling && Date.now() < holdUntil.current) return; // older messages are being prepended — stay where the reader is
     listRef.current?.scrollToEnd({ animated: false });

@@ -692,7 +692,7 @@ function ChatThread({
   const newWhileAway = showJump ? Math.max(0, messages.length - jumpBaseLenRef.current) : 0;
 
   const isActive = useMemo(() => {
-    const lastAgent = [...messages].reverse().find((m) => m.sender_kind !== 'customer');
+    const lastAgent = [...messages].reverse().find((m) => m.sender_kind === 'agent');
     return !!lastAgent && Date.now() - new Date(lastAgent.created_at).getTime() < ACTIVE_WINDOW_MS;
   }, [messages]);
 
@@ -957,6 +957,8 @@ function ChatThread({
           onScroll={onListScroll}
           onScrollBeginDrag={chatScroll.onScrollBeginDrag}
           scrollEventThrottle={64}
+          // Render the whole page up front: with fewer rows the ones above the viewport are only ESTIMATED and
+          // re-measure a few seconds later, which pushed the list up by itself. (Do not lower these.)
           initialNumToRender={60}
           maxToRenderPerBatch={60}
           windowSize={31}
@@ -973,6 +975,8 @@ function ChatThread({
                 <Text style={s.daySepText}>{item.label}</Text>
                 <View style={s.daySepLine} />
               </View>
+            ) : item.message.sender_kind === 'system' ? (
+              <SystemNote message={item.message} />
             ) : (
               <Bubble
                 message={item.message}
@@ -1224,6 +1228,21 @@ function Highlighted({ text, query }: { text: string; query: string }) {
   }
   if (from < text.length) parts.push(text.slice(from));
   return <>{parts}</>;
+}
+
+/**
+ * The resolution trail staff leave in the conversation ("Resolved by …", "Resolved on time", "… reopened"). Centred,
+ * no bubble; green for a resolution, like the staff side. Time shown so the client sees WHEN it was resolved.
+ */
+function SystemNote({ message }: { message: ChatMessage }) {
+  if (!message.body) return null;
+  const resolved = message.body.startsWith('✅');
+  return (
+    <View style={[s.sysNote, resolved && s.sysNoteOk]}>
+      <Text style={[s.sysNoteText, resolved && s.sysNoteTextOk]}>{message.body}</Text>
+      <Text style={s.sysNoteTime}>{formatTime(message.created_at)}</Text>
+    </View>
+  );
 }
 
 const Bubble = React.memo(function Bubble({
@@ -1686,6 +1705,22 @@ const s = StyleSheet.create({
 
   daySep: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 14 },
   daySepLine: { flex: 1, height: 1, backgroundColor: '#e2e8f0' },
+  sysNote: {
+    alignSelf: 'center',
+    alignItems: 'center',
+    marginVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    maxWidth: '88%',
+  },
+  sysNoteOk: { backgroundColor: '#DCFCE7', borderColor: '#86EFAC' },
+  sysNoteText: { fontSize: 12.5, fontWeight: '700', color: palette.muted, textAlign: 'center' },
+  sysNoteTextOk: { color: '#166534', fontWeight: '800' },
+  sysNoteTime: { fontSize: 10.5, fontWeight: '600', color: palette.mutedLight, marginTop: 2 },
   daySepText: { fontSize: 11, fontWeight: '800', color: palette.mutedLight, letterSpacing: 0.4 },
 
   bubbleLine: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 3, gap: 8 },

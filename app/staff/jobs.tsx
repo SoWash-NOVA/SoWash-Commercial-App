@@ -30,6 +30,7 @@ import {
   Text,
   FlatList,
   TextInput,
+  Alert,
   TouchableOpacity,
   Modal,
   Pressable,
@@ -60,8 +61,10 @@ import { photoUrl, photoUrls } from '../../src/api/client';
 import { StaffJob } from '../../src/api/types';
 import PageHeader from '../../src/components/PageHeader';
 import ChatTargetSheet from '../../src/components/ChatTargetSheet';
+import { sharePhotoToConversation, sharePhotoExternally } from '../../src/jobShare';
 import { shareJobToConversation } from '../../src/jobShare';
 import { PhotoStripList, PhotoStripSkeleton, PhotoThumb, useAfterOpen } from '../../src/components/PhotoStripList';
+import PhotoViewerModal, { ViewerPhoto } from '../../src/components/PhotoViewerModal';
 
 const isFinished = (status: string | null | undefined) =>
   String(status || '').trim().toLowerCase().startsWith('complet');
@@ -514,6 +517,20 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
     [job.tbt_photos],
   );
   const attendance = job.attendance ?? [];
+  // Check-in / check-out pictures, flattened so the full-screen viewer can zoom and swipe through them.
+  const [attViewer, setAttViewer] = useState<number | null>(null);
+  const attShots = useMemo<ViewerPhoto[]>(() => {
+    const out: ViewerPhoto[] = [];
+    (job.attendance ?? []).forEach((a) => {
+      const i1 = photoUrl(a.clock_in_image_url);
+      const o1 = photoUrl(a.clock_out_image_url);
+      if (i1) out.push({ id: out.length, url: i1, senderName: `${a.fo_name} · Check-in`, createdAt: a.clock_in_at ?? '' });
+      if (o1) out.push({ id: out.length, url: o1, senderName: `${a.fo_name} · Check-out`, createdAt: a.clock_out_at ?? '' });
+    });
+    return out;
+  }, [job.attendance]);
+  const [attSendUrl, setAttSendUrl] = useState<string | null>(null);
+  let attShotAt = 0;
   const fsrUrls = useMemo(() => {
     const u = photoUrl(job.fsr_photo);
     return u ? [u] : [];
@@ -604,6 +621,8 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
                   {attendance.map((a, i) => {
                     const clockInPhoto = photoUrl(a.clock_in_image_url);
                     const clockOutPhoto = photoUrl(a.clock_out_image_url);
+                    const inIdx = clockInPhoto ? attShotAt++ : -1;
+                    const outIdx = clockOutPhoto ? attShotAt++ : -1;
                     return (
                       <View key={`${a.fo_name}-${i}`} style={detail.attendanceRow}>
                         <View style={{ flex: 1 }}>
@@ -621,14 +640,36 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
                         </View>
                         {clockInPhoto || clockOutPhoto ? (
                           <View style={{ flexDirection: 'row', gap: 6 }}>
-                            {clockInPhoto && ready ? <PhotoThumb url={clockInPhoto} width={36} height={36} radius={8} priority="low" /> : null}
-                            {clockOutPhoto && ready ? <PhotoThumb url={clockOutPhoto} width={36} height={36} radius={8} priority="low" /> : null}
+                            {clockInPhoto && ready ? (
+                              <TouchableOpacity activeOpacity={0.9} onPress={() => setAttViewer(inIdx)} onLongPress={() => setAttSendUrl(clockInPhoto)} delayLongPress={350} accessibilityLabel="Open check-in photo">
+                                <PhotoThumb url={clockInPhoto} width={44} height={44} radius={8} priority="low" />
+                              </TouchableOpacity>
+                            ) : null}
+                            {clockOutPhoto && ready ? (
+                              <TouchableOpacity activeOpacity={0.9} onPress={() => setAttViewer(outIdx)} onLongPress={() => setAttSendUrl(clockOutPhoto)} delayLongPress={350} accessibilityLabel="Open check-out photo">
+                                <PhotoThumb url={clockOutPhoto} width={44} height={44} radius={8} priority="low" />
+                              </TouchableOpacity>
+                            ) : null}
                           </View>
                         ) : null}
                       </View>
                     );
                   })}
                 </View>
+                {attViewer !== null ? (
+                  <PhotoViewerModal photos={attShots} initialIndex={attViewer} onClose={() => setAttViewer(null)} onSend={(p) => setAttSendUrl(p.url)} onShare={(p) => void sharePhotoExternally(p.url).catch((e) => Alert.alert('Could not share', e?.message || 'Try again.'))} />
+                ) : null}
+                <ChatTargetSheet
+                  visible={attSendUrl !== null}
+                  title="Send photo to chat"
+                  subtitle="Attendance"
+                  accent={accent}
+                  onClose={() => setAttSendUrl(null)}
+                  onPick={async (conversationId, conversationTitle) => {
+                    await sharePhotoToConversation(conversationId, attSendUrl as string);
+                    return `Photo sent to ${conversationTitle}.`;
+                  }}
+                />
               </>
             ) : null}
 

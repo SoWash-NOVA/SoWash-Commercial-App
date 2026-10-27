@@ -9,7 +9,7 @@ import React, { useRef, useState } from 'react';
 import { FlatList, Modal, StatusBar, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, Send } from 'lucide-react-native';
+import { ChevronLeft, Send, Share2 } from 'lucide-react-native';
 import ZoomableImage from './ZoomableImage';
 import { formatDateTime } from '../hooks';
 
@@ -26,12 +26,15 @@ export default function PhotoViewerModal({
   initialIndex,
   onClose,
   onSend,
+  onShare,
 }: {
   photos: ViewerPhoto[];
   initialIndex: number;
   onClose: () => void;
   /** Staff only: shows a "send to chat" button for the photo on screen. */
   onSend?: (photo: ViewerPhoto) => void;
+  /** Staff only: shows a "share outside the app" (WhatsApp…) button for the photo on screen. */
+  onShare?: (photo: ViewerPhoto) => void;
 }) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -61,6 +64,11 @@ export default function PhotoViewerModal({
             <Text style={st.count}>
               {index + 1} / {photos.length}
             </Text>
+          ) : null}
+          {onShare && current ? (
+            <TouchableOpacity onPress={() => onShare(current)} style={st.back} hitSlop={10} accessibilityLabel="Share photo (WhatsApp, etc.)">
+              <Share2 size={22} color="#fff" />
+            </TouchableOpacity>
           ) : null}
           {onSend && current ? (
             <TouchableOpacity onPress={() => onSend(current)} style={st.back} hitSlop={10} accessibilityLabel="Send photo to chat">

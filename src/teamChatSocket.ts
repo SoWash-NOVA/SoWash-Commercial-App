@@ -15,9 +15,9 @@
 // This module's own job is only to reconnect with backoff and hand off
 // whatever arrives; it is never a hard dependency for anything else.
 //
-// Started/stopped from app/staff/_layout.tsx (staff-only scope) rather than
-// the root layout — this is an internal-staff-only feature with nothing to
-// connect for a client session.
+// Started/stopped from app/staff/_layout.tsx for office staff and from
+// app/(tabs)/_layout.tsx for a client (the server lets a client token in as a
+// listen-only connection that only ever receives Support-chat change signals).
 
 import { SERVER_BASE, getToken } from './api/client';
 import { TeamMessage } from './api/types';
@@ -36,6 +36,18 @@ export type TeamSocketEvent =
 type Listener = (event: TeamSocketEvent) => void;
 
 const listeners = new Set<Listener>();
+
+/**
+ * Support chat (client <-> office staff) change signal, from services/staffChatSocket.js notifySupportChat().
+ * Signal only: the app re-fetches over REST. Kept on its own listener set so Team-chat subscribers never see it.
+ */
+export type SupportSocketEvent = {
+  type: 'support_changed';
+  event: 'message' | 'read' | 'reaction' | 'typing' | 'thread';
+  thread_id: number | null;
+  client_id: number;
+};
+const supportListeners = new Set<(event: SupportSocketEvent) => void>();
 
 let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -82,7 +94,18 @@ async function connect() {
 
   socket.onmessage = (event) => {
     try {
-      const payload = JSON.parse(event.data) as TeamSocketEvent;
+      const raw = JSON.parse(event.data) as TeamSocketEvent | SupportSocketEvent;
+      if (raw.type === 'support_changed') {
+        supportListeners.forEach((l) => {
+          try {
+            l(raw);
+          } catch {
+            // One bad subscriber must not stop the others.
+          }
+        });
+        return;
+      }
+      const payload = raw as TeamSocketEvent;
       listeners.forEach((listener) => {
         try {
           listener(payload);
@@ -124,6 +147,14 @@ export function stopTeamSocket(): void {
     socket.close();
     socket = null;
   }
+}
+
+/** Live "the Support chat changed" signal (staff inbox / staff thread / the client's own chat). */
+export function subscribeSupportSocket(listener: (event: SupportSocketEvent) => void): () => void {
+  supportListeners.add(listener);
+  return () => {
+    supportListeners.delete(listener);
+  };
 }
 
 export function subscribeTeamSocket(listener: Listener): () => void {
