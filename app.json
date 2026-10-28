@@ -3,7 +3,7 @@
     "owner": "sowash-abeer",
     "name": "SoWash Commercial",
     "slug": "sowash-commercial-app",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "sowashcommercial",
