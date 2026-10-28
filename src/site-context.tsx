@@ -34,6 +34,15 @@ interface SiteContextValue {
   refresh: () => Promise<void>;
   /** True when the client has one site, so the switcher can hide itself. */
   isSingleSite: boolean;
+  /** True for an EPC / parent account: its sites belong to several customers, so screens name the customer. */
+  isMultiClient: boolean;
+  /** EPC accounts: the customers (one per commercial_clients row among the sites), A-Z. Empty otherwise. */
+  customers: { id: number; name: string; siteCount: number }[];
+  /** EPC accounts: null = all customers. Narrows the site list, visits and counts to that customer. */
+  selectedClientId: number | null;
+  setSelectedClientId: (id: number | null) => void;
+  /** `sites`, narrowed to the selected customer (the same list when none is selected). */
+  visibleSites: Site[];
 }
 
 const SiteContext = createContext<SiteContextValue | null>(null);
@@ -46,10 +55,12 @@ const SiteContext = createContext<SiteContextValue | null>(null);
  * — this is a UI preference, not a secret.
  */
 const SITE_KEY = 'portalSelectedSiteId';
+const CLIENT_KEY = 'portalSelectedClientId';
 
 export function SiteProvider({ children }: { children: ReactNode }) {
   const { data, loading, error, refresh } = useSites();
   const [selectedSiteId, setSelected] = useState<number | null>(null);
+  const [selectedClientId, setSelectedClient] = useState<number | null>(null);
   const [restored, setRestored] = useState(false);
 
   const sites = useMemo(() => data?.sites ?? [], [data]);
@@ -62,6 +73,9 @@ export function SiteProvider({ children }: { children: ReactNode }) {
         const raw = await SecureStore.getItemAsync(SITE_KEY);
         const id = raw ? parseInt(raw, 10) : NaN;
         if (!cancelled && Number.isFinite(id)) setSelected(id);
+        const rawClient = await SecureStore.getItemAsync(CLIENT_KEY);
+        const cid = rawClient ? parseInt(rawClient, 10) : NaN;
+        if (!cancelled && Number.isFinite(cid)) setSelectedClient(cid);
       } catch {
         // Fall back to All sites.
       } finally {
@@ -85,6 +99,55 @@ export function SiteProvider({ children }: { children: ReactNode }) {
       void SecureStore.deleteItemAsync(SITE_KEY).catch(() => {});
     }
   }, [restored, loading, sites, selectedSiteId]);
+
+  // Customers of an EPC account, derived from the sites list.
+  const customers = useMemo(() => {
+    const map = new Map<number, { id: number; name: string; siteCount: number }>();
+    for (const x of sites) {
+      if (x.site_client_id == null) continue;
+      const cur = map.get(x.site_client_id);
+      if (cur) cur.siteCount += 1;
+      else map.set(x.site_client_id, { id: x.site_client_id, name: x.client_name || `Customer #${x.site_client_id}`, siteCount: 1 });
+    }
+    const list = [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
+    return list.length > 1 ? list : [];
+  }, [sites]);
+
+  // A restored customer that is no longer in the list would filter everything to nothing.
+  useEffect(() => {
+    if (!restored || loading || sites.length === 0 || selectedClientId === null) return;
+    if (!customers.some((cu) => cu.id === selectedClientId)) {
+      setSelectedClient(null);
+      void SecureStore.deleteItemAsync(CLIENT_KEY).catch(() => {});
+    }
+  }, [restored, loading, sites.length, customers, selectedClientId]);
+
+  const setSelectedClientId = useCallback(
+    (id: number | null) => {
+      setSelectedClient(id);
+      // A site of a different customer must not stay selected under the new customer.
+      setSelected((cur) => {
+        if (cur === null || id === null) return cur;
+        const keep = sites.find((x) => x.id === cur)?.site_client_id === id;
+        if (!keep) void SecureStore.deleteItemAsync(SITE_KEY).catch(() => {});
+        return keep ? cur : null;
+      });
+      (async () => {
+        try {
+          if (id === null) await SecureStore.deleteItemAsync(CLIENT_KEY);
+          else await SecureStore.setItemAsync(CLIENT_KEY, String(id));
+        } catch {
+          // Non-fatal.
+        }
+      })();
+    },
+    [sites],
+  );
+
+  const visibleSites = useMemo(
+    () => (selectedClientId === null ? sites : sites.filter((x) => x.site_client_id === selectedClientId)),
+    [sites, selectedClientId],
+  );
 
   const setSelectedSiteId = useCallback((id: number | null) => {
     setSelected(id);
@@ -113,8 +176,13 @@ export function SiteProvider({ children }: { children: ReactNode }) {
       error,
       refresh,
       isSingleSite: sites.length === 1,
+      isMultiClient: customers.length > 1,
+      customers,
+      selectedClientId,
+      setSelectedClientId,
+      visibleSites,
     }),
-    [sites, selectedSiteId, selectedSite, setSelectedSiteId, loading, error, refresh],
+    [sites, selectedSiteId, selectedSite, setSelectedSiteId, loading, error, refresh, customers, selectedClientId, setSelectedClientId, visibleSites],
   );
 
   return <SiteContext.Provider value={value}>{children}</SiteContext.Provider>;
@@ -124,6 +192,11 @@ export function useSiteContext(): SiteContextValue {
   const ctx = useContext(SiteContext);
   if (!ctx) throw new Error('useSiteContext must be used inside a SiteProvider');
   return ctx;
+}
+
+/** Safe outside a SiteProvider (returns false) - for shared components like JobCard. */
+export function useIsMultiClient(): boolean {
+  return useContext(SiteContext)?.isMultiClient ?? false;
 }
 
 /** One-line location for a site card: "Korangi, Karachi". */

@@ -90,10 +90,20 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { palette } from '../../src/theme';
 import FadeInRow from '../../src/components/FadeInRow';
 import { openJobActions } from '../../src/components/JobActions';
-import { tc } from '../../src/themeEngine';
+import { tc, keep } from '../../src/themeEngine';
 import { useAuth } from '../../src/auth/AuthContext';
 import { useSiteContext } from '../../src/site-context';
-import { useJobs, useStats, useUnreadCount, dayKey, formatDateOnly, relativeDay } from '../../src/hooks';
+import {
+  useJobs,
+  useStats,
+  useUnreadCount,
+  useGenerationPlants,
+  useGenerationSummary,
+  useLatestGenerationMonth,
+  dayKey,
+  formatDateOnly,
+  relativeDay,
+} from '../../src/hooks';
 import { SiteSwitcher } from '../../src/components/SiteSwitcher';
 import PageHeader from '../../src/components/PageHeader';
 
@@ -240,10 +250,12 @@ function dateParts(value: string | null | undefined): { day: string; month: stri
 export default function OverviewScreen() {
   const router = useRouter();
   const { clientName, user } = useAuth();
-  const { selectedSiteId, selectedSite } = useSiteContext();
+  const { selectedSiteId, selectedSite, selectedClientId } = useSiteContext();
 
-  const stats = useStats();
-  const upcoming = useJobs({ scope: 'upcoming', siteId: selectedSiteId, limit: 5 });
+  const stats = useStats(selectedClientId);
+  const genPlants = useGenerationPlants();
+  const hasGeneration = (genPlants.data?.plants?.length ?? 0) > 0;
+  const upcoming = useJobs({ scope: 'upcoming', siteId: selectedSiteId, clientId: selectedClientId, limit: 5 });
   const { unread } = useUnreadCount();
 
   const coords = extractCoords(selectedSite);
@@ -303,15 +315,29 @@ export default function OverviewScreen() {
           /* The badge is a plain dot, not a count. Two notifications per
              visit means a number would read "1" almost always, and a dot
              survives the case where the poll is stale. */
-          <TouchableOpacity
-            onPress={() => router.push('/notifications')}
-            style={s.bellBtn}
-            activeOpacity={0.85}
-            accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
-          >
-            <Bell size={18} color="#fff" />
-            {unread > 0 ? <View style={s.bellDot} /> : null}
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {/* Generation & PR: only for clients with published reports */}
+            {hasGeneration ? (
+              <TouchableOpacity
+                onPress={() => router.push('/generation' as never)}
+                style={s.genBtn}
+                activeOpacity={0.85}
+                accessibilityLabel="Open Generation and PR reports"
+              >
+                <Sun size={16} color="#fff" />
+                <Text style={s.genBtnText}>Generation</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              onPress={() => router.push('/notifications')}
+              style={s.bellBtn}
+              activeOpacity={0.85}
+              accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+            >
+              <Bell size={18} color="#fff" />
+              {unread > 0 ? <View style={s.bellDot} /> : null}
+            </TouchableOpacity>
+          </View>
         }
       >
         <SiteSwitcher />
@@ -446,6 +472,9 @@ export default function OverviewScreen() {
             data={weather.data}
           />
         </FadeInRow>
+
+        {/* ── Generation & PR — only for clients whose reports SoWash has published ── */}
+        <GenerationHome onOpen={() => router.push('/generation' as never)} />
 
         {/* ── Counts — each tile is a link into /jobs, pre-filtered ────── */}
         <FadeInRow index={3}>
@@ -754,6 +783,60 @@ function StatTile({
 }
 
 
+const GEN_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/** Home-screen entry to Generation & PR: the newest published month's total and average PR. Renders nothing without published data. */
+function GenerationHome({ onOpen }: { onOpen: () => void }) {
+  const month = useLatestGenerationMonth();
+  const summary = useGenerationSummary(month);
+  const rows = summary.data?.summary ?? [];
+  if (!month || rows.length === 0) return null;
+
+  const num = (v: string | number | null) => (v === null || v === undefined || v === '' ? null : Number(v));
+  const total = rows.reduce((a, r) => a + (num(r.total_yield_kwh) ?? 0), 0);
+  // average PR over the plants, weighted by the days each reported
+  let w = 0;
+  let sum = 0;
+  for (const r of rows) {
+    const pr = num(r.avg_pr_pct);
+    const d = num(r.days_reported) ?? 0;
+    if (pr !== null && d > 0) {
+      w += d;
+      sum += pr * d;
+    }
+  }
+  const pr = w ? sum / w : null;
+  const [y, m] = month.split('-').map(Number);
+
+  return (
+    <FadeInRow index={3}>
+      <SectionHead title="Generation & PR" action="Open" onAction={onOpen} />
+      <TouchableOpacity activeOpacity={0.9} onPress={onOpen} accessibilityLabel="Open Generation and PR reports">
+        <LinearGradient colors={['#1C9BE0', '#33B8F0', '#4CC9A0']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={g.card}>
+          <View style={g.top}>
+            <View style={g.icon}>
+              <Sun size={18} color={keep('#fff')} />
+            </View>
+            <Text style={g.month}>{GEN_MONTHS[m - 1]} {y}</Text>
+          </View>
+          <Text style={g.value}>
+            {Math.round(total).toLocaleString()} <Text style={g.unit}>kWh generated</Text>
+          </Text>
+          <View style={g.row}>
+            <View style={g.pill}>
+              <Text style={g.pillText}>{pr === null ? 'PR —' : `Avg PR ${pr.toFixed(1)}%`}</Text>
+            </View>
+            <View style={g.pill}>
+              <Text style={g.pillText}>{rows.length} plant{rows.length === 1 ? '' : 's'}</Text>
+            </View>
+            <Text style={g.more}>View reports ›</Text>
+          </View>
+        </LinearGradient>
+      </TouchableOpacity>
+    </FadeInRow>
+  );
+}
+
 function RobotMeta({ label, value }: { label: string; value: string }) {
   return (
     <View style={{ flex: 1 }}>
@@ -816,6 +899,18 @@ const s = StyleSheet.create({
   // and, since there's nothing below to scroll past, is unreachable.
   scroll: { paddingHorizontal: 18, paddingTop: 4, paddingBottom: 140 },
 
+  genBtn: {
+    height: 42,
+    paddingHorizontal: 14,
+    borderRadius: 21,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
+  genBtnText: { fontSize: 13, fontWeight: '800', color: '#fff' },
   bellBtn: {
     width: 42,
     height: 42,
@@ -1060,4 +1155,17 @@ const s = StyleSheet.create({
   emptyBody: { fontSize: 12.5, lineHeight: 18, color: palette.muted, textAlign: 'center' },
 
   skeleton: { borderRadius: 26, backgroundColor: '#fff', ...CARD_SHADOW },
+});
+
+const g = StyleSheet.create({
+  card: { borderRadius: 20, padding: 16 },
+  top: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  icon: { width: 32, height: 32, borderRadius: 10, backgroundColor: keep('#1789C9'), alignItems: 'center', justifyContent: 'center' },
+  month: { fontSize: 13, fontWeight: '800', color: keep('#fff'), letterSpacing: 0.3 },
+  value: { fontSize: 30, fontWeight: '900', color: keep('#fff'), marginTop: 12, letterSpacing: -0.5 },
+  unit: { fontSize: 13, fontWeight: '700', color: keep('#EAF6FF') },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
+  pill: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: keep('#1789C9') },
+  pillText: { fontSize: 12, fontWeight: '800', color: keep('#fff') },
+  more: { marginLeft: 'auto', fontSize: 13, fontWeight: '800', color: keep('#fff') },
 });

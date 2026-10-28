@@ -25,13 +25,24 @@ import { useSiteContext, siteLocation } from '../site-context';
 
 export function SiteSwitcher() {
   const { accent } = useAccent();
-  const { sites, selectedSiteId, selectedSite, setSelectedSiteId, isSingleSite } =
-    useSiteContext();
+  const {
+    sites,
+    selectedSiteId,
+    selectedSite,
+    setSelectedSiteId,
+    isSingleSite,
+    isMultiClient,
+    customers,
+    selectedClientId,
+    setSelectedClientId,
+    visibleSites,
+  } = useSiteContext();
   const [open, setOpen] = useState(false);
 
   if (isSingleSite || sites.length === 0) return null;
 
-  const label = selectedSite?.site_name || 'All sites';
+  const selectedCustomer = customers.find((cu) => cu.id === selectedClientId) ?? null;
+  const label = selectedSite?.site_name || selectedCustomer?.name || (isMultiClient ? 'All customers' : 'All sites');
 
   const choose = (id: number | null) => {
     setSelectedSiteId(id);
@@ -58,21 +69,44 @@ export function SiteSwitcher() {
           {/* Stop taps inside the sheet from closing it. */}
           <Pressable style={local.sheet} onPress={() => {}}>
             <View style={local.sheetHeader}>
-              <Text style={local.sheetTitle}>Choose a site</Text>
+              <Text style={local.sheetTitle}>{isMultiClient ? 'Choose a customer / site' : 'Choose a site'}</Text>
               <TouchableOpacity onPress={() => setOpen(false)} hitSlop={10}>
                 <X size={20} color={palette.muted} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+              {isMultiClient ? (
+                <>
+                  <Text style={local.groupLabel}>CUSTOMER</Text>
+                  <Option
+                    title="All customers"
+                    subtitle={`${customers.length} customers · ${sites.length} sites`}
+                    selected={selectedClientId === null}
+                    accent={accent}
+                    onPress={() => setSelectedClientId(null)}
+                  />
+                  {customers.map((cu) => (
+                    <Option
+                      key={cu.id}
+                      title={cu.name}
+                      subtitle={`${cu.siteCount} site${cu.siteCount === 1 ? '' : 's'}`}
+                      selected={selectedClientId === cu.id}
+                      accent={accent}
+                      onPress={() => setSelectedClientId(cu.id)}
+                    />
+                  ))}
+                  <Text style={[local.groupLabel, { marginTop: 14 }]}>SITE</Text>
+                </>
+              ) : null}
               <Option
-                title="All sites"
-                subtitle={`${sites.length} sites on this account`}
+                title={isMultiClient && selectedCustomer ? `All sites of ${selectedCustomer.name}` : 'All sites'}
+                subtitle={`${visibleSites.length} site${visibleSites.length === 1 ? '' : 's'}`}
                 selected={selectedSiteId === null}
                 accent={accent}
                 onPress={() => choose(null)}
               />
-              {sites.map((site) => (
+              {visibleSites.map((site) => (
                 <Option
                   key={site.id}
                   title={site.site_name || `Site #${site.id}`}
@@ -123,6 +157,7 @@ function Option({
 }
 
 const local = StyleSheet.create({
+  groupLabel: { fontSize: 11, fontWeight: '800', letterSpacing: 0.6, color: palette.mutedLight, paddingHorizontal: 4, paddingVertical: 6 },
   trigger: {
     flexDirection: 'row',
     alignItems: 'center',

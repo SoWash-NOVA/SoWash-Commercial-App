@@ -92,6 +92,9 @@ export interface Site {
   system_type: string | null;
   installation_status: string | null;
   installation_date: string | null;
+  /** EPC / parent accounts: which customer (commercial_clients row) this site belongs to. Absent on older backends. */
+  client_name?: string | null;
+  site_client_id?: number;
   /**
    * commercial_sites.latitude / longitude — Postgres numeric, so node-postgres sends STRINGS
    * ("31.52040000"). Used by the Overview weather card (extractCoords in app/(tabs)/index.tsx).
@@ -1023,4 +1026,107 @@ export interface StaffDirectoryUser {
 export interface StaffDirectoryResponse {
   success: boolean;
   users: StaffDirectoryUser[];
+}
+
+// ─────────────────────── Generation & PR reports ───────────────────────
+// /customer-portal/generation/* - PUBLISHED reports only (see routes/generationPortalRoutes.js).
+
+export interface GenerationPlant {
+  id: number;
+  client_id: number;
+  client_name: string;
+  name: string;
+  dc_capacity_kwp: string | number | null;
+}
+
+/** One plant's month, from the generation_monthly_summary view. Numerics arrive as strings (Postgres numeric). */
+export interface GenerationSummaryRow {
+  client_id: number;
+  client_name: string;
+  plant_id: number;
+  plant_name: string;
+  month: string; // YYYY-MM
+  days_reported: number | string;
+  days_offline: number | string;
+  total_yield_kwh: string | number | null;
+  avg_pr_pct: string | number | null;
+  avg_eq_hours: string | number | null;
+  best_day_kwh: string | number | null;
+  dc_capacity_kwp: string | number | null;
+}
+
+export interface GenerationDay {
+  date: string; // YYYY-MM-DD
+  yield_kwh: string | number | null;
+  expected_kwh: string | number | null;
+  irradiance: string | number | null;
+  eq_hours: string | number | null;
+  pr_pct: string | number | null;
+  status: string;
+}
+
+export interface GenerationReport {
+  id: number;
+  client_id: number;
+  client_name: string;
+  title: string;
+  period_label: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  published_at: string | null;
+}
+
+/** One published report as data (GET /customer-portal/generation/reports/:id/data) - the app draws it itself. */
+export interface GenerationReportDay {
+  date: string | null;
+  label: string;
+  kind: string;
+  yield_kwh: string | number | null;
+  expected_kwh: string | number | null;
+  irradiance: string | number | null;
+  eq_hours: string | number | null;
+  pr_pct: string | number | null;
+  status: string;
+}
+
+export interface GenerationReportInverter {
+  id: number;
+  plant_id: number;
+  name: string;
+  date: string;
+  yield_kwh: string | number | null;
+  has_picture: boolean;
+  curve: { pts: [number, number][]; peak: { m: number; kw: number }; dips: { m: number; kw: number; kind: string }[] } | null;
+}
+
+export interface GenerationReportData {
+  report: GenerationReport;
+  plants: { plant_id: number; name: string; dc_capacity_kwp: string | number | null; days: GenerationReportDay[] }[];
+  inverters: GenerationReportInverter[];
+}
+
+/** Which days have published data (the Generation centre's date picker is built from this). */
+export interface GenerationCalendarDay {
+  date: string; // YYYY-MM-DD
+  plants: number;
+  kwh: number | string;
+  pr: number | string | null;
+  salitex: boolean;
+}
+
+/** One selected period: every plant's published daily figures + inverters (GET /customer-portal/generation/range). */
+export interface GenerationRangePlant {
+  plant_id: number;
+  name: string;
+  client_id: number;
+  client_name: string;
+  report_code: string;
+  dc_capacity_kwp: string | number | null;
+  days: GenerationReportDay[];
+}
+
+export interface GenerationRangeData {
+  range: { from: string; to: string };
+  plants: GenerationRangePlant[];
+  inverters: GenerationReportInverter[];
 }

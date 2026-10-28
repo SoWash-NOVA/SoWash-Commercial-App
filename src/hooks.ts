@@ -13,6 +13,10 @@ import { AppState } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import api, { errorMessage } from './api/client';
 import {
+  GenerationDay,
+  GenerationPlant, GenerationReportData, GenerationCalendarDay, GenerationRangeData,
+  GenerationReport,
+  GenerationSummaryRow,
   HistoryResponse,
   JobDetailResponse,
   JobScope,
@@ -61,6 +65,8 @@ import {
 } from './api/types';
 import { subscribeTeamSocket, subscribeSupportSocket, sendTyping } from './teamChatSocket';
 import { dataCache } from './dataCache';
+import { Directory, File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 interface AsyncState<T> {
   data: T | null;
@@ -164,11 +170,13 @@ export function useSites() {
  * with the site switcher. The dashboard says "across all sites" on them rather
  * than letting the numbers quietly disagree with a filtered list.
  */
-export function useStats() {
+export function useStats(clientId: number | null = null) {
   return useAsync<PortalStats>(async () => {
-    const { data } = await api.get<PortalStats>('customer-portal/stats');
+    const { data } = await api.get<PortalStats>('customer-portal/stats', {
+      params: clientId ? { client_id: clientId } : undefined,
+    });
     return data;
-  }, [], 'stats');
+  }, [clientId], 'stats');
 }
 
 /**
@@ -183,23 +191,26 @@ export function useStats() {
 export function useJobs(opts: {
   scope?: JobScope;
   siteId?: number | null;
+  /** EPC accounts: only this customer's visits (ignored by the server unless it is one of the login's customers). */
+  clientId?: number | null;
   status?: string;
   search?: string;
   limit?: number;
 } = {}) {
-  const { scope = 'all', siteId = null, status, search, limit } = opts;
+  const { scope = 'all', siteId = null, clientId = null, status, search, limit } = opts;
 
   return useAsync<HistoryResponse>(async () => {
     const params: Record<string, string | number> = {};
     if (scope !== 'all') params.scope = scope;
     if (siteId) params.site_id = siteId;
+    if (clientId) params.client_id = clientId;
     if (status && status !== 'all') params.status = status;
     if (search && search.trim()) params.search = search.trim();
     if (limit) params.limit = limit;
 
     const { data } = await api.get<HistoryResponse>('customer-portal/history', { params });
     return data;
-  }, [scope, siteId, status, search, limit], 'jobs');
+  }, [scope, siteId, clientId, status, search, limit], 'jobs');
 }
 
 /** One schedule with its field service report. Approved jobs (or today's) only. */
@@ -705,8 +716,8 @@ export async function registerStaffPushToken(token: string): Promise<void> {
 // IS the conversation. Staff see an inbox because an agent handles many
 // clients; a site manager only ever talks to SoWash.
 //
-// Polling, not websockets: the backend has no socket layer. 5s while the
-// screen is focused and the app is active, stopped otherwise.
+// Live pushes come from the socket (src/teamChatSocket.ts, since 2026-10-27); polling (5s while the
+// screen is focused and the app is active, stopped otherwise) is the safety net underneath.
 
 /** How often to poll for new messages while the Support tab is open. */
 const CHAT_POLL_MS = 5_000;
@@ -2475,4 +2486,126 @@ export async function updateTeamGroupMembers(
   );
   if (!data?.conversation) throw new Error('Could not update the group.');
   return data.conversation;
+}
+
+
+// ─────────────────────── Generation & PR reports ───────────────────────
+
+export function useGenerationPlants() {
+  return useAsync<{ plants: GenerationPlant[] }>(async () => {
+    const { data } = await api.get<{ plants: GenerationPlant[] }>('customer-portal/generation/plants');
+    return data;
+  }, [], 'genPlants');
+}
+
+export function useGenerationSummary(month: string) {
+  return useAsync<{ summary: GenerationSummaryRow[] }>(async () => {
+    if (!month) return { summary: [] };
+    const { data } = await api.get<{ summary: GenerationSummaryRow[] }>('customer-portal/generation/summary', {
+      params: { month },
+    });
+    return data;
+  }, [month], 'genSummary');
+}
+
+export function useGenerationDaily(plantId: number | null, month: string) {
+  return useAsync<{ days: GenerationDay[] } | null>(async () => {
+    if (!plantId) return null;
+    const { data } = await api.get<{ days: GenerationDay[] }>('customer-portal/generation/daily', {
+      params: { plant_id: plantId, month },
+    });
+    return data;
+  }, [plantId, month], 'genDaily');
+}
+
+export function useGenerationReports() {
+  return useAsync<{ reports: GenerationReport[] }>(async () => {
+    const { data } = await api.get<{ reports: GenerationReport[] }>('customer-portal/generation/reports');
+    return data;
+  }, [], 'genReports');
+}
+
+/**
+ * Fetch a published report (the full iNOVAA HTML design) and hand it to the phone's own viewer / browser through the system
+ * share sheet - the same approach as opening a chat file, so no WebView (and no new native build) is needed.
+ */
+export async function openGenerationReport(id: number, title: string): Promise<void> {
+  const { data } = await api.get<{ report: { html: string } }>(`customer-portal/generation/reports/${id}`);
+  if (!(await Sharing.isAvailableAsync())) throw new Error('This phone cannot open files from the app.');
+  const dir = new Directory(Paths.cache, 'generation-reports');
+  dir.create({ intermediates: true, idempotent: true });
+  const safe = title.replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 60) || 'report';
+  const file = new File(dir, `${safe}_${id}.html`);
+  if (file.exists) file.delete();
+  file.create();
+  file.write(data.report.html);
+  await Sharing.shareAsync(file.uri, { mimeType: 'text/html', UTI: 'public.html', dialogTitle: title });
+}
+
+export function useGenerationReportData(id: number) {
+  return useAsync<GenerationReportData>(async () => {
+    const { data } = await api.get<GenerationReportData>(`customer-portal/generation/reports/${id}/data`);
+    return data;
+  }, [id], `genReport:${id}`);
+}
+
+/** The newest month (YYYY-MM) that has a published report, so the screens open on data instead of an empty current month. */
+export function useLatestGenerationMonth(): string {
+  const reports = useGenerationReports();
+  const end = reports.data?.reports?.find((r) => r.period_end)?.period_end;
+  return end ? end.slice(0, 7) : '';
+}
+
+/** 'client' = a client login (its own plants); 'staff' = office staff (every client, or one chosen client). */
+export type GenerationScope = 'client' | 'staff';
+const genBase = (scope: GenerationScope) => (scope === 'staff' ? 'generation/staff' : 'customer-portal/generation');
+const genParams = (scope: GenerationScope, clientId: number | null) => (scope === 'staff' && clientId ? { client_id: clientId } : {});
+
+export function useGenerationCalendar(scope: GenerationScope = 'client', clientId: number | null = null) {
+  return useAsync<{ days: GenerationCalendarDay[]; clients?: { id: number; name: string }[] }>(async () => {
+    const { data } = await api.get<{ days: GenerationCalendarDay[]; clients?: { id: number; name: string }[] }>(
+      `${genBase(scope)}/calendar`,
+      { params: genParams(scope, clientId) },
+    );
+    // a server that does not have the route yet can answer with a web page (HTTP 200) instead of JSON: say so, do not show "no reports"
+    if (!data || !Array.isArray(data.days)) throw new Error('The server has not been updated for this screen yet (generation calendar route missing).');
+    return data;
+  }, [scope, clientId], `genCalendar:${scope}:${clientId ?? 'all'}`);
+}
+
+export function useGenerationRange(from: string, to: string, scope: GenerationScope = 'client', clientId: number | null = null) {
+  return useAsync<GenerationRangeData | null>(async () => {
+    if (!from || !to) return null;
+    const { data } = await api.get<GenerationRangeData>(`${genBase(scope)}/range`, { params: { from, to, ...genParams(scope, clientId) } });
+    if (!data || !Array.isArray(data.plants)) throw new Error('The server has not been updated for this screen yet (generation range route missing).');
+    return data;
+  }, [from, to, scope, clientId], `genRange:${scope}:${clientId ?? 'all'}:${from}:${to}`);
+}
+
+/** The iNOVAA report (HTML) rebuilt for the selected period - the same design the team used to email. */
+export async function fetchGenerationView(
+  from: string,
+  to: string,
+  scope: GenerationScope = 'client',
+  clientId: number | null = null,
+): Promise<{ html: string; title: string }> {
+  const { data } = await api.get<{ html: string; title: string }>(`${genBase(scope)}/view`, {
+    params: { from, to, ...genParams(scope, clientId) },
+    timeout: 60000,
+  });
+  if (!data || typeof data.html !== 'string') throw new Error('The server has not been updated for this screen yet (generation view route missing).');
+  return data;
+}
+
+/** Hand a rendered report to the phone's own share / print sheet (kept for "Share / print the full report"). */
+export async function shareGenerationHtml(html: string, title: string): Promise<void> {
+  if (!(await Sharing.isAvailableAsync())) throw new Error('This phone cannot open files from the app.');
+  const dir = new Directory(Paths.cache, 'generation-reports');
+  dir.create({ intermediates: true, idempotent: true });
+  const safe = title.replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 60) || 'report';
+  const file = new File(dir, `${safe}.html`);
+  if (file.exists) file.delete();
+  file.create();
+  file.write(html);
+  await Sharing.shareAsync(file.uri, { mimeType: 'text/html', UTI: 'public.html', dialogTitle: title });
 }

@@ -12,6 +12,7 @@ import {
   View,
   Text,
   FlatList,
+  ScrollView,
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
@@ -42,7 +43,7 @@ function colorFor(name: string) {
 export default function SitesScreen() {
   const router = useRouter();
   const { accent } = useAccent();
-  const { sites, selectedSiteId, setSelectedSiteId, loading, error, refresh } = useSiteContext();
+  const { sites, selectedSiteId, setSelectedSiteId, loading, error, refresh, isMultiClient, customers, selectedClientId, setSelectedClientId, visibleSites } = useSiteContext();
 
   const [refreshing, setRefreshing] = React.useState(false);
   const onRefresh = async () => {
@@ -50,6 +51,22 @@ export default function SitesScreen() {
     await refresh();
     setRefreshing(false);
   };
+
+  // EPC accounts: sites grouped under their customer (or just the chosen customer's sites).
+  type Row = { kind: 'header'; key: string; name: string; count: number } | { kind: 'site'; key: string; site: Site };
+  const rows = React.useMemo<Row[]>(() => {
+    if (!isMultiClient || selectedClientId !== null) {
+      return visibleSites.map((site) => ({ kind: 'site', key: String(site.id), site }));
+    }
+    const out: Row[] = [];
+    for (const cu of customers) {
+      const list = visibleSites.filter((x) => x.site_client_id === cu.id);
+      if (list.length === 0) continue;
+      out.push({ kind: 'header', key: `h${cu.id}`, name: cu.name, count: list.length });
+      list.forEach((site) => out.push({ kind: 'site', key: String(site.id), site }));
+    }
+    return out;
+  }, [isMultiClient, selectedClientId, visibleSites, customers]);
 
   const open = (site: Site) => {
     setSelectedSiteId(site.id);
@@ -76,18 +93,46 @@ export default function SitesScreen() {
         subtitle={
           sites.length === 0
             ? 'No sites on this account'
-            : `${sites.length} site${sites.length === 1 ? '' : 's'} on this account`
+            : isMultiClient
+              ? `${customers.length} customers · ${visibleSites.length} site${visibleSites.length === 1 ? '' : 's'}`
+              : `${sites.length} site${sites.length === 1 ? '' : 's'} on this account`
         }
       />
 
       <FlatList
-        data={sites}
-        keyExtractor={(item) => String(item.id)}
+        data={rows}
+        keyExtractor={(row) => row.key}
+        ListHeaderComponent={
+          isMultiClient ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
+              {[{ id: null as number | null, name: 'All customers' }, ...customers].map((cu) => {
+                const on = selectedClientId === cu.id;
+                return (
+                  <TouchableOpacity
+                    key={String(cu.id)}
+                    onPress={() => setSelectedClientId(cu.id)}
+                    style={[s.chip, on && { backgroundColor: accent, borderColor: accent }]}
+                  >
+                    <Text style={[s.chipText, on && { color: '#fff' }]} numberOfLines={1}>{cu.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          ) : null
+        }
         style={{ flex: 1 }}
         contentContainerStyle={s.list}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accent} />}
-        renderItem={({ item }) => {
+        renderItem={({ item: row }) => {
+          if (row.kind === 'header') {
+            return (
+              <Text style={s.groupHeader}>
+                {row.name.toUpperCase()} · {row.count} SITE{row.count === 1 ? '' : 'S'}
+              </Text>
+            );
+          }
+          const item = row.site;
           const active = item.id === selectedSiteId;
           const name = item.site_name || `Site #${item.id}`;
           const tint = colorFor(name);
@@ -202,6 +247,9 @@ const s = StyleSheet.create({
   avatar: { width: 44, height: 44, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: '#fff', fontSize: 16, fontWeight: '900' },
   name: { fontSize: 15.5, fontWeight: '800', color: palette.ink },
+  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surface, maxWidth: 220 },
+  chipText: { fontSize: 12.5, fontWeight: '800', color: palette.ink },
+  groupHeader: { fontSize: 11, fontWeight: '800', letterSpacing: 0.6, color: palette.mutedLight, marginTop: 12, marginBottom: 8, paddingHorizontal: 2 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
   meta: { flex: 1, fontSize: 12, color: palette.mutedLight, fontWeight: '600' },
   activePill: { borderRadius: 10, paddingHorizontal: 9, paddingVertical: 5 },

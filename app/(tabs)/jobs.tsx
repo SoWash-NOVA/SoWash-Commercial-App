@@ -106,7 +106,7 @@ function visitDayLabel(raw: string | null | undefined): string {
 export default function JobsScreen() {
   const router = useRouter();
   const { accent } = useAccent();
-  const { selectedSiteId, selectedSite } = useSiteContext();
+  const { selectedSiteId, selectedSite, selectedClientId } = useSiteContext();
   const params = useLocalSearchParams<{ scope?: string; status?: string }>();
 
   const [scope, setScope] = useState<JobScope>((params.scope as JobScope) || 'past');
@@ -125,13 +125,14 @@ export default function JobsScreen() {
   const { data, loading, error, refreshing, refresh } = useJobs({
     scope,
     siteId: selectedSiteId,
+    clientId: selectedClientId,
     search,
     limit: 100,
   });
 
   // Independent of the scope tabs/search above — always "whatever happened
   // most recently", one job, one day.
-  const last = useJobs({ scope: 'past', siteId: selectedSiteId, limit: 1 });
+  const last = useJobs({ scope: 'past', siteId: selectedSiteId, clientId: selectedClientId, limit: 1 });
   const lastJob = last.data?.jobs?.[0] ?? null;
 
   // Refetch on focus, not just pull-to-refresh — otherwise a job completed

@@ -51,7 +51,9 @@ const STAFF_ROOT = '/staff';
 const STAFF_STACK_SEGMENTS = ['phonebook', 'files'];
 
 /** Full-screen pages BOTH identities use (clients and staff): never bounced by either guard. */
-const SHARED_STACK_SEGMENTS = ['change-password'];
+// 'generation' is used by both: a client's own Generation & PR (index, report, view) and staff's all-clients view (generation/staff);
+// without it the staff guard bounced every tap on the staff Generation button straight back to /staff.
+const SHARED_STACK_SEGMENTS = ['change-password', 'generation'];
 
 function RootNavigator() {
   const { status, appRole } = useAuth();

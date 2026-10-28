@@ -30,6 +30,7 @@ import {
   ClipboardList,
   Clock,
   RotateCcw,
+  Sun,
 } from 'lucide-react-native';
 import { palette } from '../../src/theme';
 import { useStaffStats, useStaffJobs, dayKey, formatDateOnly, relativeDay, statusMeta, StaffStatsPeriod } from '../../src/hooks';
@@ -120,6 +121,17 @@ export default function StaffOverviewScreen() {
       <PageHeader
         title={`${greeting()}${user?.firstName ? `, ${user.firstName}` : ''}`}
         subtitle="Here's what's happening across every client."
+        right={
+          <TouchableOpacity
+            onPress={() => router.push('/generation/staff' as never)}
+            style={s.genBtn}
+            activeOpacity={0.85}
+            accessibilityLabel="Open Generation and PR for every client"
+          >
+            <Sun size={16} color="#fff" />
+            <Text style={s.genBtnText}>Generation</Text>
+          </TouchableOpacity>
+        }
       />
 
       <ScrollView
@@ -273,6 +285,18 @@ const CARD_SHADOW = {
 };
 
 const s = StyleSheet.create({
+  genBtn: {
+    height: 42,
+    paddingHorizontal: 14,
+    borderRadius: 21,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+  },
+  genBtnText: { fontSize: 13, fontWeight: '800', color: '#fff' },
   screen: { flex: 1, backgroundColor: '#F4F7FA' },
   centre: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   wash: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },

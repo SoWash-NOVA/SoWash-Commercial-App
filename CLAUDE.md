@@ -6,7 +6,7 @@ Keep it updated as the code changes — it will go stale otherwise.
 **Size rule:** keep this file well under 150k characters (it is loaded into every session). The history of
 completed work lives in **`docs/CHANGELOG.md`** (newest first, ~200k chars) — append new entries THERE, not here,
 and read it on demand (grep it by topic) rather than in full. Only update §10 "Current state" here.
-**Last full update: 2026-10-21** (changelog split out; §1–§9 content last refreshed 2026-10-07).
+**Last full update: 2026-10-27** (changelog split out; §1–§9 content last refreshed 2026-10-07, plus the chat/socket/push facts in §6 and §10).
 
 ---
 ## 1. What this app is
@@ -159,7 +159,7 @@ and `sowash-backend/routes/portalAuthRoutes.js` (login).
 | `GET /maintenance-history`, `/maintenance-stats`, `/maintenance/:id/detail` | contract-level maintenance tasks — **no site column exists**, so these never take a `site_id` |
 | `GET /sld/:schedule_id` | the site's single-line diagram + pins + this visit's before/after photos per pin |
 | `GET/POST /notifications*`, `/push/register` | bell feed, unread count, mark-read, FCM registration |
-| `GET/POST /chat*` | the one support thread for this account (polled, not websocket): `/chat`, `/chat/messages` (`limit`/`before_id` paging, `site_id`, `schedule_id` visit tag), `/chat/rings`, `/chat/typing`, `PUT /chat/messages/:mid/reaction`, `/chat/read`. **Reply-to (`reply_to_id`) not on the server yet** (patch + migration pending) |
+| `GET/POST /chat*` | the one support thread for this account (5s polling as the backup; LIVE via the socket since 2026-10-27, see §6 "Live Support chat"): `/chat`, `/chat/messages` (`limit`/`before_id` paging, `site_id`, `schedule_id` visit tag), `/chat/rings`, `/chat/typing`, `PUT /chat/messages/:mid/reaction`, `/chat/read`. **Reply-to (`reply_to_id`) not on the server yet** (patch + migration pending) |
 
 Staff mode (`app/staff/*`) uses the staff APIs instead — `/api/schedule/{history,stats,clients}`,
 `/api/commercial-chat/*` (client support inbox) and `/api/staff-chat/*` (Team DMs/groups + WebSocket) —
@@ -259,6 +259,50 @@ residential app probably wants it too.
   copy), run migrations BEFORE uploading routes that select the new columns, never upload the local
   `package-lock.json`, then `pm2 restart` and check `pm2 logs`. Deploys are manual; "done" in the changelog means
   "in the working tree" unless it says deployed.
+- **Live Support chat (2026-10-27):** `services/staffChatSocket.js` (backend, same `/ws/staff-chat` endpoint as Team chat) has
+  `notifySupportChat({clientId, threadId, event})` — SIGNAL ONLY (`support_changed`; apps re-fetch over REST). A `kind:'portal'`
+  token may connect as a LISTEN-ONLY client socket (client_id read from the DB). Called from `routes/commercialChatRoutes.js` and
+  `routes/customerJobHistoryRoutes.js` on message / read / reaction / typing / thread change. App: `subscribeSupportSocket` in
+  `src/teamChatSocket.ts` (own listener set — Team subscribers never see it), used by `useChat`, `useStaffChatThread`, both unread
+  hooks and the staff inbox; the client socket starts in `app/(tabs)/_layout.tsx`, which also calls `prefetchClientChat()`.
+  Never remove the polling underneath.
+- **Staff push for client messages** (`services/commercialNotifications.js` `notifyAgentsOfCommercialMessage`): unassigned → every
+  `STAFF_ROLES` user, assigned → only the assignee. Notifies on the first message of an unanswered run, on EVERY ring (a message
+  tagged with a site, `isRing`) and after 5 quiet minutes; logs a `[commercial-chat push]` line per message (`pm2 logs | grep`).
+  Staff tokens live in `user_fcm_tokens` (`POST /api/user/fcm-token`).
+- **Client chat shows only the resolution trail of staff system rows** (`CLIENT_VISIBLE_MESSAGE_SQL` / `clientSystemBody` in
+  `customerJobHistoryRoutes.js`: "Resolved by X", "Resolved on time", "reopened"; never assignment notes, overdue or "Resolved late").
+  The wording is matched to `PATCH /threads/:id` in `commercialChatRoutes.js` — change both together.
+- **Client visit report hides field-officer details:** attendance is only a "Team attendance marked" card (no names, times or photos —
+  `JobDetailBody.tsx`). The staff job sheet keeps names/photos (tap = zoom viewer, send to Team chat, share outside the app via
+  `sharePhotoExternally` in `src/jobShare.ts`). The backend still sends the full attendance rows to the client; strip them in
+  `docs/backend-patches/2026-10-07-client-visit-attendance.md` if they must never leave the server.
+- **Chat list/scroll:** keep `initialNumToRender 60 / maxToRenderPerBatch 60 / windowSize 31` on the client chat list (fewer rows =
+  estimated heights re-measure seconds later and the list drifts up). `useChatScroll` stays pinned to the end until the reader's
+  first drag, then follows only when they are at the bottom. Team chat has ONE paperclip menu (camera / gallery / document / shared
+  files); a picture picked as a document is refused with a clear message (`pickDocument` in `src/staffFiles.ts`).
+- **EPC / parent accounts (2026-10-27):** `commercial_clients.parent_client_id` (migration `2026-10-27-epc-parent-client.sql`, backend
+  repo) links a customer to its EPC's client row (e.g. Burj). An EPC login is a normal portal login whose `users.client_id` is the
+  EPC's row; `scopedClientIds()` in `customerJobHistoryRoutes.js` widens ONLY the data routes (stats, history, today, sites, maintenance,
+  visit detail/photos, SLD, TBT, safety training) to the EPC + its customers, read-only. Chat, notifications, push and rings stay on the
+  login's own client. App: `Site.client_name/site_client_id`, `isMultiClient` / `useIsMultiClient()` in `src/site-context.tsx` name the
+  customer on the Sites tab and visit cards. An EPC ringing a customer's site is refused by the server (not its site).
+  Many customers: `SiteContext` also has `customers`, `selectedClientId` (persisted) and `visibleSites`; the switcher shows a Customer
+  section first, the Sites tab has customer chips and groups sites under customer headers, and `useJobs`/`useStats` send
+  `?client_id=` which `requestScope()` (backend) honours only if it is one of the login's customers.
+  Staff manage it in the web console (`sowash-frontend` `pages/CI/ListCIClients.js`): "Add EPC" (`POST /commercial-clients/epc`, a row
+  with placeholder contract numbers and `is_epc = true`) and a "Parent (EPC) account" select in the client edit modal
+  (`PATCH /commercial-clients/:id/parent`; one level only, a client with customers cannot get a parent).
+- **Generation & PR reports (2026-10-28):** staff (operations / ci_admin / admin) upload a solar-portal export in the web console
+  (`sowash-frontend` `pages/CI/GenerationReports.js`) -> Node `routes/generationRoutes.js` calls the Python `generation_service`
+  (sibling dir, NOT the ML `tracker_service`; `engine.py` is the original `generation_report.py` unchanged so the HTML design is
+  identical) -> stored as a DRAFT in `generation_reports` / `generation_daily` (migration `2026-10-28-generation-reports.sql`;
+  views `generation_daily_effective` + `generation_monthly_summary` take the newest published figures, so re-publishing never
+  double-counts) -> ci_admin/admin publishes. Clients read PUBLISHED data only via `routes/generationPortalRoutes.js`
+  (`/customer-portal/generation/*`, EPC-aware via `utils/clientScope.js`); the app screen is `app/generation/index.tsx` (Account ->
+  "Generation & PR reports", shown only when a plant has published data; the full HTML report opens through the share sheet).
+  The service listens on 127.0.0.1:8001 only; backend env `GENERATION_SERVICE_URL`. The Salitex path requires every figure (no
+  silent defaults); the Salitex graph-image "analysis" is a heuristic estimate, not a reading of the real curve.
 - **Chat admin rule:** only `ciadmin@sowash.pk` and `superadmin@sowash.pk` assign/reassign conversations
   (`CHAT_ADMIN_EMAILS` in `routes/commercialChatRoutes.js`, mirrored in `src/chatAdmins.ts` — edit BOTH). Closing an
   assigned conversation needs the assignee or an admin.
@@ -442,6 +486,24 @@ about the backend checkout being stale):
 
 
 ## 10. Current state and changelog
+
+- **2026-10-31 (Generation centre):** client app Generation screen = Day/Week/Month picker built from `/customer-portal/generation/calendar`, dashboard from `/range`, 'View report' = `/view` (generation_service `/render` rebuilds the HTML for the selection; Salitex returns its stored daily report) shown in a WebView (`react-native-webview`, NEW native module -> new dev build; without it the screen offers the share sheet). Shared UI in `src/components/GenerationParts.tsx` / `GenerationDashboard.tsx`. Deploy: upload `generation_service/server.py` (restart `generation-service`) and `routes/generationPortalRoutes.js` (`pm2 restart all`). Details: docs/CHANGELOG.md 2026-10-31.
+- **2026-10-28 snapshot (end of day):** Generation & PR reports are DEPLOYED and the user tested the web console end to end
+  (SQL `2026-10-28-generation-reports.sql` run; `generation_service` running under pm2 as `generation-service` from
+  `/var/www/sowashapp/backend/generation_service` with its own venv; backend files `generationRoutes.js`, `generationPortalRoutes.js`,
+  `utils/clientScope.js`, `server.js` uploaded). EPC accounts (Add EPC, Parent dropdown, Create User client link, customer
+  filter) are live too. NOT yet done / not tested on a device: the mobile Generation screen (`app/generation/index.tsx`, needs a
+  new app build + a published report to see anything), the Salitex form path, EPC-grouped plants in the app. Next ideas: admin
+  dashboard exceptions list (PR below 80, offline days, plants with no data), monthly PDF/email, FusionSolar / iSolarCloud API
+  ingestion, `commercialClientsRoutes.js` has its auth commented out (open client create/edit/delete + `/epc` + `/parent`).
+- **2026-10-27 snapshot:** backend files that must be on the VPS for the new chat behaviour: `services/staffChatSocket.js`,
+  `routes/commercialChatRoutes.js`, `routes/customerJobHistoryRoutes.js`, `services/commercialNotifications.js` (the last edits —
+  ring push + resolution trail — touched `customerJobHistoryRoutes.js` and `commercialNotifications.js`: re-upload, then
+  `pm2 restart all`). `D:/github/nova/sowash-backend` is CURRENT again and is the copy to patch and upload from (§7's "stale copy"
+  warning is about `C:/Users/Emaad/Desktop/sowash-backend`). No SQL for these. All of today's app changes are JS-only (no new build)
+  and none was seen on a device. Release: bump `app.json` version → commit → `eas build --platform android --profile production`.
+  Open: confirm `saad@sowash.pk` (Admin) now gets push for an UNASSIGNED chat after the latest upload; attendance rows are still sent
+  to clients by the backend (only hidden in the UI).
 
 Full history: **`docs/CHANGELOG.md`** (append new entries there). Snapshot as of 2026-10-21 — RE-VERIFY, it ages fast:
 

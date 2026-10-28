@@ -14,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { CalendarDays, ChevronRight, Images, MapPin, Route, User } from 'lucide-react-native';
 import { palette } from '../theme';
 import { useAccent } from '../theme-context';
+import { useIsMultiClient } from '../site-context';
 import { JobSummary } from '../api/types';
 import { formatDateOnly, relativeDay, statusMeta } from '../hooks';
 import { parsePhotos } from '../api/client';
@@ -21,6 +22,7 @@ import { parsePhotos } from '../api/client';
 function JobCardImpl({ job, showSite = true }: { job: JobSummary; showSite?: boolean }) {
   const router = useRouter();
   const { accent } = useAccent();
+  const multiClient = useIsMultiClient();
 
   const meta = statusMeta(job.status);
   const when = relativeDay(job.scheduled_date);
@@ -41,6 +43,11 @@ function JobCardImpl({ job, showSite = true }: { job: JobSummary; showSite?: boo
           {showSite ? (
             <Text style={local.site} numberOfLines={1}>
               {job.site_name || 'Site'}
+            </Text>
+          ) : null}
+          {showSite && multiClient && job.client_name ? (
+            <Text style={local.customer} numberOfLines={1}>
+              {job.client_name}
             </Text>
           ) : null}
           <View style={local.metaRow}>
@@ -119,6 +126,7 @@ const local = StyleSheet.create({
   },
   headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   site: { fontSize: 15, fontWeight: '800', color: palette.ink, marginBottom: 3 },
+  customer: { fontSize: 11.5, fontWeight: '700', color: palette.muted, marginBottom: 3, marginTop: -1 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
   date: { fontSize: 12, fontWeight: '700', color: palette.muted },
   relative: { fontSize: 12, fontWeight: '600', color: palette.mutedLight },

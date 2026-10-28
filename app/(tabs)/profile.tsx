@@ -30,6 +30,7 @@ import {
   Mail,
   Phone,
   ShieldCheck,
+  Sun,
   Trash2,
   User,
   Wrench,
@@ -38,7 +39,7 @@ import {
 import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useAuth, initialsOf } from '../../src/auth/AuthContext';
-import { useClient, formatDateOnly, formatSystemSize } from '../../src/hooks';
+import { useClient, useGenerationPlants, formatDateOnly, formatSystemSize } from '../../src/hooks';
 import { useSiteContext } from '../../src/site-context';
 import { PRIVACY_EMAIL } from '../../src/contact';
 import PageHeader from '../../src/components/PageHeader';
@@ -52,6 +53,7 @@ export default function ProfileScreen() {
   const { accent, setAccent } = useAccent();
   const { user, clientName, signOut } = useAuth();
   const { sites } = useSiteContext();
+  const genPlants = useGenerationPlants();
   const { data, loading, error, refreshing, refresh } = useClient();
 
   const c = data?.customer;
@@ -210,6 +212,13 @@ export default function ProfileScreen() {
         {/* ── More. Play checks that privacy and account closure are both
             reachable in-app, so they live here rather than in a web link. ── */}
         <View style={[styles.card, { marginTop: 16, paddingVertical: 4 }]}>
+          {(genPlants.data?.plants?.length ?? 0) > 0 ? (
+            <LinkRow
+              icon={<Sun size={16} color={palette.muted} />}
+              label="Generation & PR reports"
+              onPress={() => router.push('/generation' as never)}
+            />
+          ) : null}
           <LinkRow
             icon={<Wrench size={16} color={palette.muted} />}
             label="Maintenance history"
