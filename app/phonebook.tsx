@@ -64,6 +64,7 @@ import {
   Supervisor,
   TeamUser,
   approveRestoreRequest,
+  CONSENT_REQUIRED,
   backupContacts,
   cancelRestoreRequest,
   createRestoreRequest,
@@ -80,6 +81,7 @@ import {
   supervisorAsContact,
 } from '../src/phonebook';
 import { useAuth } from '../src/auth/AuthContext';
+import { Consent, ContactsDisclosureModal, getConsent, setConsent } from '../src/phonebookConsent';
 
 type Scope = 'mine' | 'supervisors' | 'team' | 'requests';
 
@@ -304,6 +306,12 @@ export default function PhonebookScreen() {
   const [busy, setBusy] = useState<null | 'backup' | 'restore'>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  // Google Play Prominent Disclosure: nothing is read or uploaded until the user has agreed (src/phonebookConsent.tsx)
+  const [consent, setConsentState] = useState<Consent>(null);
+  const [consentOpen, setConsentOpen] = useState(false);
+  useEffect(() => {
+    if (user?.id) void getConsent(Number(user.id)).then(setConsentState);
+  }, [user?.id]);
 
   const mounted = useRef(true);
   const requestId = useRef(0);
@@ -474,7 +482,11 @@ export default function PhonebookScreen() {
   }, [scope, loadRequests, loadSummary]);
 
   // ── back up ──
-  const runBackup = useCallback(async () => {
+  const runBackup = useCallback(async (justAgreed = false) => {
+    if (!justAgreed && consent !== 'granted') {
+      setConsentOpen(true); // show the disclosure first; "Agree" then starts the backup
+      return;
+    }
     setBusy('backup');
     setProgress(null);
     setNotice(null);
@@ -485,6 +497,10 @@ export default function PhonebookScreen() {
       await reloadAll();
     } catch (err) {
       if (!mounted.current) return;
+      if (err instanceof PhonebookError && err.message === CONSENT_REQUIRED) {
+        setConsentOpen(true);
+        return;
+      }
       setNotice({
         kind: 'error',
         text: err instanceof PhonebookError ? err.message : errorMessage(err, 'Could not back up contacts.'),
@@ -495,7 +511,31 @@ export default function PhonebookScreen() {
         setProgress(null);
       }
     }
-  }, [reloadAll, user?.id]);
+  }, [reloadAll, user?.id, consent]);
+
+  const answerConsent = async (choice: 'granted' | 'declined') => {
+    // saved BEFORE the backup starts: backupContacts() re-reads the stored choice and refuses without it
+    if (user?.id) await setConsent(Number(user.id), choice);
+    setConsentState(choice);
+    setConsentOpen(false);
+    if (choice === 'granted') void runBackup(true);
+  };
+  const stopBackup = () =>
+    Alert.alert(
+      'Stop backing up your contacts?',
+      "SoWash will stop reading and uploading your phone's contacts. What is already saved stays in your backup until an administrator removes it.",
+      [
+        { text: 'Keep backing up', style: 'cancel' },
+        {
+          text: 'Stop',
+          style: 'destructive',
+          onPress: () => {
+            if (user?.id) void setConsent(Number(user.id), 'declined');
+            setConsentState('declined');
+          },
+        },
+      ],
+    );
 
   // ── restore request ──
   const sendRequest = async () => {
@@ -790,7 +830,9 @@ export default function PhonebookScreen() {
               {summary?.last_synced_at ? `Last backed up ${formatDateTime(summary.last_synced_at)}` : 'Not backed up yet'}
             </Text>
             <Text style={s.statusSub}>
-              Backed up automatically whenever you open the app.
+              {consent === 'granted'
+                ? 'Backed up automatically whenever you open the app.'
+                : 'Automatic backup is off. Tap “Back up now” to review what is collected and turn it on.'}
               {summary?.last_device_count != null ? ` ${summary.last_device_count} contacts were on the phone.` : ''}
             </Text>
           </View>
@@ -805,6 +847,11 @@ export default function PhonebookScreen() {
           {busy === 'backup' ? <ActivityIndicator size="small" color={accent} /> : <CloudUpload size={17} color={accent} />}
           <Text style={[s.btnText, { color: accent }]}>Back up now</Text>
         </TouchableOpacity>
+        {consent === 'granted' ? (
+          <TouchableOpacity onPress={stopBackup} style={{ alignSelf: 'center', marginTop: 10 }} hitSlop={8}>
+            <Text style={[s.statusSub, { textDecorationLine: 'underline' }]}>Stop backing up my contacts</Text>
+          </TouchableOpacity>
+        ) : null}
 
         {busy ? (
           <View style={{ marginTop: 12 }}>
@@ -921,6 +968,7 @@ export default function PhonebookScreen() {
 
   return (
     <View style={s.screen}>
+      <ContactsDisclosureModal visible={consentOpen} onAgree={() => void answerConsent('granted')} onDecline={() => void answerConsent('declined')} />
       <PageHeader title="Phone Book" subtitle={subtitle} onBack={() => router.back()} />
       <ShareContactSheet
         contacts={shareTarget}

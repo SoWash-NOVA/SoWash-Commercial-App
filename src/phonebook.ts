@@ -7,6 +7,8 @@
 //
 //   • BACK UP only ever ADDS/UPDATES on the server. A phone with fewer
 //     contacts (a new handset) never removes anything from the backup.
+//   • NOTHING is read or uploaded until the user has tapped "Agree" on the in-app disclosure (src/phonebookConsent.tsx, Google Play's
+//     Prominent Disclosure rule): autoBackup() and backupContacts() check getConsent() first.
 //   • BACK UP runs AUTOMATICALLY while the staff app is in use (autoBackup(),
 //     started from app/staff/_layout.tsx) — no tap, no dialog; the company phone
 //     and SIM hold official contacts only. Android still shows its own one-time
@@ -35,6 +37,7 @@ import { Alert, Linking, Platform } from 'react-native';
 import * as Contacts from 'expo-contacts/legacy';
 import * as SecureStore from 'expo-secure-store';
 import { api } from './api/client';
+import { getConsent } from './phonebookConsent';
 
 // ───────────────────────────── types ─────────────────────────────
 
@@ -124,6 +127,9 @@ export type RestoreResult = {
 export type Progress = { label: string; done: number; total: number };
 
 /** Why a run could not start; the screen shows the message. */
+/** Thrown by backupContacts when the user has not agreed to the disclosure yet. */
+export const CONSENT_REQUIRED = 'CONSENT_REQUIRED';
+
 export class PhonebookError extends Error {
   constructor(message: string) {
     super(message);
@@ -437,6 +443,8 @@ async function backupCore(
 /** The "Back up now" button: always uploads, and shows the result. */
 export function backupContacts(onProgress: (p: Progress) => void, userId?: number): Promise<BackupResult> {
   return exclusive(async () => {
+    // no consent, no access: the screen shows the disclosure when it sees this error
+    if (userId === undefined || (await getConsent(userId)) !== 'granted') throw new PhonebookError(CONSENT_REQUIRED);
     await ensureContactsPermission();
     const out = (await backupCore(onProgress)) as { result: BackupResult; fp: string };
     // remember it so the automatic backup does not repeat the same upload
@@ -458,6 +466,8 @@ export async function autoBackup(userId: number): Promise<void> {
   if (Date.now() - lastAutoAt < AUTO_MIN_GAP_MS) return;
   lastAutoAt = Date.now();
   try {
+    // never touch the address book (or even ask Android for the permission) before the user has agreed to the disclosure
+    if ((await getConsent(userId)) !== 'granted') return;
     let perm = await Contacts.getPermissionsAsync();
     if (!perm.granted) {
       // Ask the OS at most once per app launch, and never again once Android says "don't ask again".

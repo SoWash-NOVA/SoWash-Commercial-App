@@ -6,7 +6,7 @@ Keep it updated as the code changes — it will go stale otherwise.
 **Size rule:** keep this file well under 150k characters (it is loaded into every session). The history of
 completed work lives in **`docs/CHANGELOG.md`** (newest first, ~200k chars) — append new entries THERE, not here,
 and read it on demand (grep it by topic) rather than in full. Only update §10 "Current state" here.
-**Last full update: 2026-10-27** (changelog split out; §1–§9 content last refreshed 2026-10-07, plus the chat/socket/push facts in §6 and §10).
+**Last full update: 2026-11-02** (changelog split out; §1–§5, §7–§9 last refreshed 2026-10-07; §2, §4 (generation row), §6 and §10 refreshed for the Generation & PR work).
 
 ---
 ## 1. What this app is
@@ -69,6 +69,8 @@ src/
 app/staff/                    OFFICE/STAFF mode (a second identity — see 2026-09-28 entry): Overview, Jobs, Chats
                                  (Support + Team), Clients, Account
 app/documentation/            Documentation menu: Site SLD, TBT, Safety Training
+app/generation/               Generation & PR: index (client centre), staff (all-clients centre, same component), view (the iNOVAA HTML report in a
+                                 WebView), report/[id] (one published report). Shared UI: src/components/GenerationCentre / GenerationDashboard / GenerationParts
 
 index.js                       APP ENTRY (package.json "main") — imports src/themeEngine FIRST, then expo-router/entry
 
@@ -159,6 +161,7 @@ and `sowash-backend/routes/portalAuthRoutes.js` (login).
 | `GET /maintenance-history`, `/maintenance-stats`, `/maintenance/:id/detail` | contract-level maintenance tasks — **no site column exists**, so these never take a `site_id` |
 | `GET /sld/:schedule_id` | the site's single-line diagram + pins + this visit's before/after photos per pin |
 | `GET/POST /notifications*`, `/push/register` | bell feed, unread count, mark-read, FCM registration |
+| `GET /generation/{plants,summary,daily,reports,reports/:id,reports/:id/data,calendar,range,view,inverter-picture/:id}` | Generation & PR for a client (published data only, EPC-aware): `calendar` = days that have data, `range` = one period's figures, `view` = the report HTML rebuilt for the period. STAFF equivalents (all clients, `?client_id=`) are `/api/generation/staff/{calendar,range,view}` |
 | `GET/POST /chat*` | the one support thread for this account (5s polling as the backup; LIVE via the socket since 2026-10-27, see §6 "Live Support chat"): `/chat`, `/chat/messages` (`limit`/`before_id` paging, `site_id`, `schedule_id` visit tag), `/chat/rings`, `/chat/typing`, `PUT /chat/messages/:mid/reaction`, `/chat/read`. **Reply-to (`reply_to_id`) not on the server yet** (patch + migration pending) |
 
 Staff mode (`app/staff/*`) uses the staff APIs instead — `/api/schedule/{history,stats,clients}`,
@@ -293,16 +296,29 @@ residential app probably wants it too.
   Staff manage it in the web console (`sowash-frontend` `pages/CI/ListCIClients.js`): "Add EPC" (`POST /commercial-clients/epc`, a row
   with placeholder contract numbers and `is_epc = true`) and a "Parent (EPC) account" select in the client edit modal
   (`PATCH /commercial-clients/:id/parent`; one level only, a client with customers cannot get a parent).
-- **Generation & PR reports (2026-10-28):** staff (operations / ci_admin / admin) upload a solar-portal export in the web console
-  (`sowash-frontend` `pages/CI/GenerationReports.js`) -> Node `routes/generationRoutes.js` calls the Python `generation_service`
-  (sibling dir, NOT the ML `tracker_service`; `engine.py` is the original `generation_report.py` unchanged so the HTML design is
-  identical) -> stored as a DRAFT in `generation_reports` / `generation_daily` (migration `2026-10-28-generation-reports.sql`;
-  views `generation_daily_effective` + `generation_monthly_summary` take the newest published figures, so re-publishing never
-  double-counts) -> ci_admin/admin publishes. Clients read PUBLISHED data only via `routes/generationPortalRoutes.js`
-  (`/customer-portal/generation/*`, EPC-aware via `utils/clientScope.js`); the app screen is `app/generation/index.tsx` (Account ->
-  "Generation & PR reports", shown only when a plant has published data; the full HTML report opens through the share sheet).
-  The service listens on 127.0.0.1:8001 only; backend env `GENERATION_SERVICE_URL`. The Salitex path requires every figure (no
-  silent defaults); the Salitex graph-image "analysis" is a heuristic estimate, not a reading of the real curve.
+- **Generation & PR reports (2026-10-28 -> 11-02):** staff (operations / ci_admin / admin) upload a solar-portal export in the web console
+  (`sowash-frontend` `pages/CI/GenerationReports.js`; tabs Analytics / Generate / Reports / Monthly) -> Node `routes/generationRoutes.js` calls the
+  Python `generation_service` (NOT the ML `tracker_service`; `engine.py` = the original generator with ONE deliberate change: the Salitex curve
+  reader `read_curve`/`describe_curve`/`mark_dips` reads the real blue curve instead of guessing) -> a DRAFT in `generation_reports` /
+  `generation_daily` (+ `generation_inverter_daily` with curve + marked picture for Salitex Knox) -> ci_admin/admin publishes. Views
+  `generation_daily_effective` / `generation_inverter_effective` / `generation_monthly_summary` take the newest published figure, so republishing
+  never double-counts. The service (127.0.0.1:8001, pm2 `generation-service`) has `/generate` and `/render` (rebuilds the same HTML for any
+  day / week / month from stored rows; 1 plant single, 2 = original tabs, 3+ = N tabs; Salitex = its stored daily report).
+  `services/generationViews.js` is shared by the client routes (`generationPortalRoutes.js`, EPC-aware via `utils/clientScope.js`) and the staff
+  routes (`/api/generation/staff/*`). Web Analytics: hero + KPIs, client spotlight, per-plant charts, PR heatmap, inverter cards with the marked
+  picture, ONE filter bar (client/plant, period dropdown relative to the newest data day, one bar per day/week/month). KPI maths: '% of
+  expected' uses only the days that HAVE an expected figure (plant exports carry none) - never total yield / expected.
+  App: the Generation centre (`GenerationCentre`, scope 'client' or 'staff') picks a Day/Week/Month from days that have published data and
+  shows an interactive dashboard (tap-a-slice donut, scrub-able bars, PR lines); 'View report' opens `app/generation/view.tsx`, a
+  `react-native-webview` (native module: needs a build made after it was added; older builds fall back to the share sheet). The client gets
+  a Generation card + header button on Overview; staff get a header button on the staff Overview. The login gate (`app/_layout.tsx`) treats
+  `generation` as a shared route - keep it there.
+- **iNovaa Ai alerts (2026-10-31/11-01):** `services/generationAlerts.js` runs after a report is published and every morning ~08:00 PKT. Per plant it
+  compares the average PR with ITS benchmark (`services/prTargets.js`: Salitex 80, Power Cement 76, Bulleh Shah Packaging 80, PSM 1 MW 80, PSM 2 MW 75;
+  `solar_plants.pr_target` overrides) -> below = warning, at/above = 'good performance'; also flags average daily generation >20% below the previous
+  30 days. One DM per recipient (superadmin@ + ciadmin@sowash.pk) from the bot user 'iNovaa Ai' (inovaa-ai@sowash.pk, Type 'bot') in the staff chat
+  tables + a push through `notifyStaff`; `generation_alerts` (unique key per plant + report + publish time) stops repeats. Web button 'Test iNovaa Ai'
+  -> `POST /api/generation/alerts/test`. Offline-day / no-new-data alerts were not chosen (can be added).
 - **Chat admin rule:** only `ciadmin@sowash.pk` and `superadmin@sowash.pk` assign/reassign conversations
   (`CHAT_ADMIN_EMAILS` in `routes/commercialChatRoutes.js`, mirrored in `src/chatAdmins.ts` — edit BOTH). Closing an
   assigned conversation needs the assignee or an admin.
@@ -487,7 +503,15 @@ about the backend checkout being stale):
 
 ## 10. Current state and changelog
 
-- **2026-10-31 (Generation centre):** client app Generation screen = Day/Week/Month picker built from `/customer-portal/generation/calendar`, dashboard from `/range`, 'View report' = `/view` (generation_service `/render` rebuilds the HTML for the selection; Salitex returns its stored daily report) shown in a WebView (`react-native-webview`, NEW native module -> new dev build; without it the screen offers the share sheet). Shared UI in `src/components/GenerationParts.tsx` / `GenerationDashboard.tsx`. Deploy: upload `generation_service/server.py` (restart `generation-service`) and `routes/generationPortalRoutes.js` (`pm2 restart all`). Details: docs/CHANGELOG.md 2026-10-31.
+- **Staff Phone Book consent (Google Play User Data policy, 2026-11-02):** contacts are personal data that the Phone Book UPLOADS, so `src/phonebook.ts` never reads them (or even asks Android for the permission) until the staff user tapped 'Agree' on the in-app disclosure (`src/phonebookConsent.tsx`, shown by `app/staff/_layout.tsx` when the staff app opens; versioned per-user choice in SecureStore). Back/home/tap-away is not consent. Changing the disclosure wording materially = bump `DISCLOSURE_VERSION`. Privacy policy (app + docs html) and the Play Data safety / Contacts declaration must keep saying the same. 1.0.2 was rejected for the missing disclosure; 1.0.3 is the compliant version.
+- **2026-11-02 snapshot:** Generation & PR is feature-complete and LIVE on the server: all SQL (EPC, reports, inverters, curves, pictures, iNovaa Ai bot + alerts,
+  pr_target), `generation_service` with `/render`, and the backend files (generationRoutes / generationPortalRoutes / generationViews / generationAlerts /
+  prTargets). The user confirmed the iNovaa Ai DM + push, the web Analytics and the staff Generation screen (dev build). `app.json` is at 1.0.2; the next step is
+  `git commit` of app.json then `eas build --platform android --profile production` (or `--profile development` for a dev build) - a build made after
+  `react-native-webview` was added is what makes 'View report' open INSIDE the app (the current dev build shows 'Open with the phone'). Play In-App Updates
+  prompt Play-installed phones after the Play Console rollout. Not yet done / ideas: 'Needs attention' + heatmap on mobile, offline-day and no-new-data alerts,
+  per-plant PR targets in the charts / app / HTML (they still draw 80%), BSP's plant row (created on its first report), `commercialClientsRoutes.js` has its
+  auth commented out, the backend logs decoded JWTs and plaintext login passwords.
 - **2026-10-28 snapshot (end of day):** Generation & PR reports are DEPLOYED and the user tested the web console end to end
   (SQL `2026-10-28-generation-reports.sql` run; `generation_service` running under pm2 as `generation-service` from
   `/var/www/sowashapp/backend/generation_service` with its own venv; backend files `generationRoutes.js`, `generationPortalRoutes.js`,

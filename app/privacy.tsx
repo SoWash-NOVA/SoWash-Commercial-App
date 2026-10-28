@@ -25,7 +25,7 @@ import { useAccent } from '../src/theme-context';
 import { PRIVACY_EMAIL } from '../src/contact';
 import PageHeader from '../src/components/PageHeader';
 
-const LAST_UPDATED = '20 October 2026';
+const LAST_UPDATED = '2 November 2026';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -111,8 +111,9 @@ export default function PrivacyScreen() {
           <Bullet>
             We never access your calendar or call history. The camera and microphone are used only
             when you choose to take a photo or video or record a voice message in a chat. Your
-            contacts are read only in the SoWash staff app, to back up the company phone's
-            contacts and to restore them — client accounts never use or see this.
+            contacts are read only in the SoWash staff app, and only after the staff member has agreed
+            to the in-app notice, to back up the company phone's contacts and to restore them —
+            client accounts never use or see this.
           </Bullet>
           <Bullet>No advertising identifiers, no third-party analytics, no cross-app tracking.</Bullet>
           <Bullet>
@@ -122,15 +123,19 @@ export default function PrivacyScreen() {
 
         <Section title="Staff phone book">
           <P>
-            This applies to SoWash office staff using the company phone. Once a staff member has
-            allowed contacts access, the names, phone numbers, email addresses and company details
-            of the contacts on that phone are saved on our server automatically whenever the app is
-            used, so they can be restored on a replacement phone. Restoring them onto a phone needs
-            approval from the SoWash superadmin and an administrator. They are visible to that staff member and to SoWash administrators,
-            and to no one else. A contact is
-            never removed from the backup just because it is missing from the phone. The staff
-            member can remove any contact from their backup in the app, and can ask SoWash to
-            delete all of it.
+            This applies to SoWash office staff using the company phone. When a staff member opens
+            the staff app, SoWash Commercial shows a notice explaining that it will collect the
+            phone&apos;s contacts and upload them to SoWash&apos;s secure server (app.sowashusa.com) to back
+            them up. Only if the staff member taps &ldquo;Agree&rdquo; are the contacts&apos; names, phone
+            numbers, email addresses, company and job title read and saved automatically whenever
+            the app is used, so they can be restored on a replacement phone. If they tap &ldquo;No
+            thanks&rdquo;, nothing is read or uploaded. They can stop at any time with &ldquo;Stop backing up
+            my contacts&rdquo; in Phone Book. Contacts are used only for backup and restore: never for
+            advertising, never sold. The backup is visible to that staff member and to SoWash&apos;s
+            super administrator and CI administrator, and to no one else. Restoring it onto a phone
+            needs approval from the SoWash superadmin and an administrator. A contact is never
+            removed from the backup just because it is missing from the phone. The staff member can
+            remove any contact from their backup in the app, and can ask SoWash to delete all of it.
           </P>
         </Section>
 

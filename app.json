@@ -3,7 +3,7 @@
     "owner": "sowash-abeer",
     "name": "SoWash Commercial",
     "slug": "sowash-commercial-app",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "sowashcommercial",
@@ -76,7 +76,7 @@
       [
         "expo-contacts",
         {
-          "contactsPermission": "Allow $(PRODUCT_NAME) to read your contacts to back them up, and to add them back when you restore on a new phone."
+          "contactsPermission": "SoWash Commercial uploads your contacts to SoWash's secure server to back them up, and adds them back when you restore on a new phone. This only starts after you agree in the app."
         }
       ],
       [

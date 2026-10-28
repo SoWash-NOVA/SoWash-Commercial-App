@@ -28,7 +28,7 @@
 // is its client-level equivalent — "which CLIENT am I looking at" — and does
 // wrap the tabs here, the same way SiteProvider wraps app/(tabs)/_layout.tsx.
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Building2, ClipboardList, LayoutGrid, MessagesSquare, User } from 'lucide-react-native';
@@ -38,6 +38,7 @@ import { useStaffChatUnread, useTeamUnread } from '../../src/hooks';
 import { startTeamSocket, stopTeamSocket } from '../../src/teamChatSocket';
 import { useAuth } from '../../src/auth/AuthContext';
 import { autoBackup } from '../../src/phonebook';
+import { ContactsDisclosureModal, getConsent, setConsent } from '../../src/phonebookConsent';
 
 // 'chats' sits at index 2 (the middle of 5) on purpose — FloatingTabBar
 // renders whichever name matches centreName as the raised circle, but its
@@ -89,8 +90,24 @@ export default function StaffTabsLayout() {
   // Phone Book: the company phone's contacts are backed up automatically — a few seconds
   // after the staff app opens and each time it returns to the foreground (autoBackup()
   // throttles itself, shows no dialogs and never throws). See src/phonebook.ts.
+  // Google Play Prominent Disclosure: before the first backup the user is told what is uploaded and must tap "Agree".
+  const [askConsent, setAskConsent] = useState(false);
+  const [consented, setConsented] = useState(false);
   useEffect(() => {
     if (!user?.id) return;
+    let alive = true;
+    void getConsent(Number(user.id)).then((c) => {
+      if (!alive) return;
+      setConsented(c === 'granted');
+      setAskConsent(c === null); // never decided (or the wording changed): ask now
+    });
+    return () => {
+      alive = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || !consented) return;
     const uid = Number(user.id);
     const first = setTimeout(() => void autoBackup(uid), 4000);
     const sub = AppState.addEventListener('change', (state) => {
@@ -100,7 +117,14 @@ export default function StaffTabsLayout() {
       clearTimeout(first);
       sub.remove();
     };
-  }, [user?.id]);
+  }, [user?.id, consented]);
+
+  const answer = async (choice: 'granted' | 'declined') => {
+    // stored first: autoBackup() re-reads the saved choice and does nothing without it
+    if (user?.id) await setConsent(Number(user.id), choice);
+    setAskConsent(false);
+    setConsented(choice === 'granted');
+  };
 
   return (
     <StaffScopeProvider>
@@ -114,6 +138,8 @@ export default function StaffTabsLayout() {
         <Tabs.Screen name="chats" options={{ title: 'Chats' }} />
         <Tabs.Screen name="account" options={{ title: 'Account' }} />
       </Tabs>
+      {/* Google Play Prominent Disclosure for the contacts backup: shown in normal use, needs an explicit tap */}
+      <ContactsDisclosureModal visible={askConsent} onAgree={() => void answer('granted')} onDecline={() => void answer('declined')} />
     </StaffScopeProvider>
   );
 }
