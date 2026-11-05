@@ -2,16 +2,17 @@
 // Sales > Quotations (GET /api/quotations). Tap a row to open/edit it, "New" to create one.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View,
+  ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { FileText, Plus, Search } from 'lucide-react-native';
+import { FileText, Plus, Search, Share2 } from 'lucide-react-native';
 import { styles as shared, palette } from '../../src/theme';
 import { errorMessage } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
 import PageHeader from '../../src/components/PageHeader';
 import { canUseQuotations } from '../../src/quotation/access';
-import { QuotationRow, STATUSES, listQuotations, statusOf } from '../../src/quotation/api';
+import { QuotationRow, STATUSES, getQuotation, listQuotations, setQuotationStatus, statusOf } from '../../src/quotation/api';
+import { shareQuotationPdf } from '../../src/quotation/pdf';
 import { formatDateOnly } from '../../src/hooks';
 
 const money = (n: string | number) => Math.round(Number(n) || 0).toLocaleString('en-US');
@@ -28,6 +29,7 @@ export default function QuotationsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sharingId, setSharingId] = useState<number | null>(null);
   const seq = useRef(0); // guards against a slow earlier response overwriting a newer one
 
   const load = useCallback(
@@ -65,6 +67,32 @@ export default function QuotationsScreen() {
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [allowed]),
   );
+
+  // share a saved quotation as a PDF straight from the list
+  const share = async (row: QuotationRow) => {
+    setSharingId(row.id);
+    try {
+      const q = await getQuotation(row.id);
+      await shareQuotationPdf({ ...q.data, quoteNo: q.data?.quoteNo || q.quote_no, clientName: q.data?.clientName || q.client_name }, [user?.firstName, user?.lastName].filter(Boolean).join(' '));
+      // the share sheet gives no "sent" signal, so ask
+      if (row.status === 'draft') {
+        Alert.alert('Mark as Sent?', 'Did you send this quotation to the client?', [
+          { text: 'Not yet', style: 'cancel' },
+          {
+            text: 'Mark as Sent',
+            onPress: () =>
+              setQuotationStatus(row.id, 'sent')
+                .then((u) => setRows((prev) => prev.map((r) => (r.id === u.id ? { ...r, status: u.status } : r))))
+                .catch((e) => Alert.alert('Quotation', errorMessage(e, 'Could not update the status.'))),
+          },
+        ]);
+      }
+    } catch (e) {
+      Alert.alert('Quotation', errorMessage(e, 'Could not share the quotation.'));
+    } finally {
+      setSharingId(null);
+    }
+  };
 
   if (!allowed) {
     return (
@@ -155,6 +183,10 @@ export default function QuotationsScreen() {
                     <Text style={[s.pillText, { color: st.color }]}>{st.label}</Text>
                   </View>
                 </View>
+                <TouchableOpacity style={s.shareBtn} onPress={() => void share(item)} disabled={sharingId !== null} hitSlop={6}
+                  accessibilityLabel={`Share quotation ${item.quote_no}`}>
+                  {sharingId === item.id ? <ActivityIndicator size="small" /> : <Share2 size={18} color="#1C9BE0" />}
+                </TouchableOpacity>
               </TouchableOpacity>
             );
           }}
@@ -173,6 +205,7 @@ const s = StyleSheet.create({
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1 },
   chipText: { fontSize: 12, fontWeight: '700' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 18, borderWidth: 1, marginBottom: 10 },
+  shareBtn: { width: 36, height: 36, borderRadius: 12, backgroundColor: 'rgba(51,184,240,0.14)', alignItems: 'center', justifyContent: 'center' },
   icon: { width: 38, height: 38, borderRadius: 12, backgroundColor: 'rgba(51,184,240,0.14)', alignItems: 'center', justifyContent: 'center' },
   client: { fontSize: 15, fontWeight: '800' },
   meta: { fontSize: 12, marginTop: 2 },

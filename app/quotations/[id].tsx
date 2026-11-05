@@ -7,12 +7,10 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system/legacy';
-import { Copy, Download, Eye, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react-native';
+import { CalendarDays, Copy, Eye, Plus, RefreshCw, Save, Share2, Trash2, X } from 'lucide-react-native';
 import { styles as shared, palette } from '../../src/theme';
 import { errorMessage } from '../../src/api/client';
+import { useStaffClients } from '../../src/hooks';
 import { useAuth } from '../../src/auth/AuthContext';
 import PageHeader from '../../src/components/PageHeader';
 import KeyboardScreen from '../../src/components/KeyboardScreen';
@@ -21,10 +19,33 @@ import {
   MAX_ITEMS, MAX_TERMS, QuotationForm, QuotationStatus, STATUSES, baseQuoteNo, blankForm, getQuotation,
   nextQuoteNo, saveQuotation, setQuotationStatus, statusOf, stripRevision, todayIso,
 } from '../../src/quotation/api';
-import { DEFAULT_TERMS, buildQuotationHtml, calcTotals, fileSafe } from '../../src/quotation/template';
+import { DEFAULT_TERMS, buildQuotationHtml, calcTotals } from '../../src/quotation/template';
+import { shareQuotationPdf } from '../../src/quotation/pdf';
 
 const fmt = (n: number) => Math.round(n).toLocaleString('en-US');
 const PAGE_W = 794;
+
+// The system date picker (a native module, so required lazily: an older build without it just keeps the typed field).
+function DatePick({ value, onDone }: { value: string; onDone: (iso: string | null) => void }) {
+  let Picker: typeof import('@react-native-community/datetimepicker').default;
+  try {
+    Picker = require('@react-native-community/datetimepicker').default;
+  } catch {
+    return null;
+  }
+  const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const current = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date();
+  return (
+    <Picker
+      value={current}
+      mode="date"
+      onChange={(e, d) => {
+        if (e.type !== 'set' || !d) return onDone(null);
+        onDone(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+      }}
+    />
+  );
+}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -63,6 +84,7 @@ export default function QuotationFormScreen() {
   const [pdfBusy, setPdfBusy] = useState(false);
   const [autoQuote, setAutoQuote] = useState(!openId);
   const [genQuote, setGenQuote] = useState(false);
+  const [showDate, setShowDate] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -121,6 +143,16 @@ export default function QuotationFormScreen() {
 
   const totals = useMemo(() => calcTotals(form), [form]);
 
+  // existing clients matching what is typed (a tap fills the name and the contact person)
+  const clients = useStaffClients();
+  const suggestions = useMemo(() => {
+    const q = form.clientName.trim().toLowerCase();
+    if (q.length < 2) return [];
+    return (clients.data?.clients ?? [])
+      .filter((c) => c.client_name && c.client_name.toLowerCase().includes(q) && c.client_name.toLowerCase() !== q)
+      .slice(0, 5);
+  }, [form.clientName, clients.data]);
+
   const validate = (): boolean => {
     if (!form.clientName.trim()) { Alert.alert('Quotation', 'Client name is required.'); return false; }
     if (!form.quoteNo.trim()) { Alert.alert('Quotation', 'Quote number is required.'); return false; }
@@ -154,10 +186,11 @@ export default function QuotationFormScreen() {
     }
   };
 
-  const changeStatus = async (next: QuotationStatus) => {
-    if (!savedId || next === status) return;
+  const changeStatus = async (next: QuotationStatus, forId?: number) => {
+    const target = forId ?? savedId;
+    if (!target || (!forId && next === status)) return;
     try {
-      const q = await setQuotationStatus(savedId, next);
+      const q = await setQuotationStatus(target, next);
       setStatus(q.status);
     } catch (e) {
       Alert.alert('Quotation', errorMessage(e, 'Could not update the status.'));
@@ -183,6 +216,24 @@ export default function QuotationFormScreen() {
     } else make();
   };
 
+  // copy this quotation into a new, independent one (new number from today's date, status draft)
+  const duplicate = () => {
+    const make = () => {
+      setForm((f) => ({ ...f, quoteNo: '', revised: false, revisionOf: '', date: todayIso() }));
+      setSavedId(null);
+      setStatus(null);
+      setAutoQuote(true);
+      setDirty(true);
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    };
+    if (dirty) {
+      Alert.alert('Copy as new', 'You have unsaved changes. Copy what is on screen as a new quotation?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Copy as new', onPress: make },
+      ]);
+    } else make();
+  };
+
   const toggleRevised = () => {
     update((f) => ({ ...f, revised: !f.revised }));
     setAutoQuote(true);
@@ -198,25 +249,30 @@ export default function QuotationFormScreen() {
     setPreviewHtml(html);
   };
 
-  // PDF: print the same HTML to a file (A4 proportions: 794 x 1123) and hand it to the share sheet
+  // PDF: print the same HTML to a file and hand it to the share sheet (WhatsApp, email, ...)
   const sharePdf = async () => {
     if (!validate()) return;
     setPdfBusy(true);
     try {
-      const { uri } = await Print.printToFileAsync({
-        html: buildQuotationHtml(form),
-        width: PAGE_W,
-        height: 1123,
-        margins: { left: 0, top: 0, right: 0, bottom: 0 },
-      });
-      const name = `Quotation_${fileSafe(form.quoteNo)}_${fileSafe(form.clientName)}.pdf`;
-      const dest = `${FileSystem.cacheDirectory}${name}`;
-      await FileSystem.deleteAsync(dest, { idempotent: true });
-      await FileSystem.copyAsync({ from: uri, to: dest });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(dest, { mimeType: 'application/pdf', dialogTitle: name, UTI: 'com.adobe.pdf' });
-      } else {
-        Alert.alert('Quotation', 'Sharing is not available on this device.');
+      // a quotation that goes out must exist in the system: save first when it is new or edited
+      let id = savedId;
+      if (!id || dirty) {
+        const q = await saveQuotation(savedId, form).catch((e) => {
+          const code = (e as { response?: { status?: number } })?.response?.status;
+          throw code === 409 ? new Error('That quote number is already used. Change it and try again.') : e;
+        });
+        id = q.id;
+        setSavedId(q.id);
+        setStatus(q.status);
+        setDirty(false);
+      }
+      await shareQuotationPdf(form, [user?.firstName, user?.lastName].filter(Boolean).join(' '));
+      // the share sheet gives no "sent" signal, so ask
+      if (id && (status ?? 'draft') === 'draft') {
+        Alert.alert('Mark as Sent?', 'Did you send this quotation to the client?', [
+          { text: 'Not yet', style: 'cancel' },
+          { text: 'Mark as Sent', onPress: () => void changeStatus('sent', id) },
+        ]);
       }
     } catch (e) {
       Alert.alert('Quotation', errorMessage(e, 'Could not create the PDF.'));
@@ -280,6 +336,16 @@ export default function QuotationFormScreen() {
             <Section title="Client details">
               <Field label="CLIENT NAME *">
                 <TextInput style={input} value={form.clientName} onChangeText={setField('clientName')} placeholder="e.g. SKY Electric" placeholderTextColor={ph} />
+                {suggestions.length > 0 ? (
+                  <View style={[s.chips, { marginTop: 8 }]}>
+                    {suggestions.map((c) => (
+                      <TouchableOpacity key={c.client_id} style={[s.chip, { borderColor: '#1C9BE0' }]}
+                        onPress={() => update((f) => ({ ...f, clientName: c.client_name ?? f.clientName, attention: f.attention || c.contact_person || '' }))}>
+                        <Text style={[s.chipText, { color: '#1C9BE0' }]}>{c.client_name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : null}
               </Field>
               <Field label="SITE / ADDRESS">
                 <TextInput style={input} value={form.site} onChangeText={setField('site')} placeholder="e.g. PTC Jhelum / Akora Khattak" placeholderTextColor={ph} />
@@ -320,7 +386,16 @@ export default function QuotationFormScreen() {
                 ) : null}
               </Field>
               <Field label="DATE (YYYY-MM-DD)">
-                <TextInput style={input} value={form.date} onChangeText={setField('date')} placeholder="2026-11-05" placeholderTextColor={ph} keyboardType="numbers-and-punctuation" />
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TextInput style={[input, { flex: 1 }]} value={form.date} onChangeText={setField('date')} placeholder="2026-11-05" placeholderTextColor={ph} keyboardType="numbers-and-punctuation" />
+                  <TouchableOpacity style={[s.iconBtn, { borderColor: palette.border }]} onPress={() => setShowDate(true)} accessibilityLabel="Pick a date">
+                    <CalendarDays size={18} color="#1C9BE0" />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[s.iconBtn, { borderColor: palette.border, width: 64 }]} onPress={() => setField('date')(todayIso())}>
+                    <Text style={s.addText}>Today</Text>
+                  </TouchableOpacity>
+                </View>
+                {showDate ? <DatePick value={form.date} onDone={(iso) => { setShowDate(false); if (iso) setField('date')(iso); }} /> : null}
               </Field>
               <Field label="VALIDITY">
                 <TextInput style={input} value={form.validity} onChangeText={setField('validity')} placeholder="e.g. 30 Days" placeholderTextColor={ph} />
@@ -432,14 +507,22 @@ export default function QuotationFormScreen() {
                 <Eye size={16} color="#fff" /><Text style={s.actionText}>Preview</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[s.action, { backgroundColor: '#0F172A' }]} disabled={pdfBusy} onPress={() => void sharePdf()}>
-                {pdfBusy ? <ActivityIndicator color="#fff" /> : <Download size={16} color="#fff" />}
-                <Text style={s.actionText}>PDF</Text>
+                {pdfBusy ? <ActivityIndicator color="#fff" /> : <Share2 size={16} color="#fff" />}
+                <Text style={s.actionText}>Share PDF</Text>
               </TouchableOpacity>
             </View>
+            <Text style={[s.hint, { color: palette.muted }]}>
+              Share PDF saves the quotation, copies a ready cover message and opens the share sheet (WhatsApp, email...). Paste the message as the caption.
+            </Text>
             {savedId ? (
-              <TouchableOpacity style={s.revision} onPress={createRevision}>
-                <Copy size={14} color="#1C9BE0" /><Text style={s.addText}>Create revision (copy as new, numbered -R)</Text>
-              </TouchableOpacity>
+              <View style={{ gap: 12, marginTop: 16 }}>
+                <TouchableOpacity style={s.revision} onPress={createRevision}>
+                  <Copy size={14} color="#1C9BE0" /><Text style={s.addText}>Create revision (numbered -R)</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.revision} onPress={duplicate}>
+                  <Copy size={14} color="#1C9BE0" /><Text style={s.addText}>Copy as new quotation</Text>
+                </TouchableOpacity>
+              </View>
             ) : null}
           </ScrollView>
         </KeyboardScreen>
@@ -484,7 +567,8 @@ const s = StyleSheet.create({
   actions: { flexDirection: 'row', gap: 10, marginTop: 4 },
   action: { flex: 1, height: 48, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   actionText: { color: '#fff', fontWeight: '800', fontSize: 14 },
-  revision: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 16 },
+  revision: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  hint: { fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 10 },
   previewBar: { height: 90, paddingTop: 40, paddingHorizontal: 18, backgroundColor: '#1C9BE0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   previewTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
   empty: { textAlign: 'center', marginTop: 48, paddingHorizontal: 24, fontSize: 14 },
