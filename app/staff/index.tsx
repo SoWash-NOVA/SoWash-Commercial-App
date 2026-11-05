@@ -29,12 +29,14 @@ import {
   CircleCheck,
   ClipboardList,
   Clock,
+  FileText,
   RotateCcw,
   Sun,
 } from 'lucide-react-native';
 import { palette } from '../../src/theme';
 import { useStaffStats, useStaffJobs, dayKey, formatDateOnly, relativeDay, statusMeta, StaffStatsPeriod } from '../../src/hooks';
 import { useAuth } from '../../src/auth/AuthContext';
+import { canUseQuotations } from '../../src/quotation/access';
 import { useStaffScope } from '../../src/staff-context';
 import PageHeader from '../../src/components/PageHeader';
 import FadeInRow from '../../src/components/FadeInRow';
@@ -122,15 +124,28 @@ export default function StaffOverviewScreen() {
         title={`${greeting()}${user?.firstName ? `, ${user.firstName}` : ''}`}
         subtitle="Here's what's happening across every client."
         right={
-          <TouchableOpacity
-            onPress={() => router.push('/generation/staff' as never)}
-            style={s.genBtn}
-            activeOpacity={0.85}
-            accessibilityLabel="Open Generation and PR for every client"
-          >
-            <Sun size={16} color="#fff" />
-            <Text style={s.genBtnText}>Generation</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {canUseQuotations(user?.email) ? (
+              <TouchableOpacity
+                onPress={() => router.push('/quotations' as never)}
+                style={s.genBtn}
+                activeOpacity={0.85}
+                accessibilityLabel="Open Quotations"
+              >
+                <FileText size={16} color="#fff" />
+                <Text style={s.genBtnText}>Quotes</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              onPress={() => router.push('/generation/staff' as never)}
+              style={s.genBtn}
+              activeOpacity={0.85}
+              accessibilityLabel="Open Generation and PR for every client"
+            >
+              <Sun size={16} color="#fff" />
+              <Text style={s.genBtnText}>Generation</Text>
+            </TouchableOpacity>
+          </View>
         }
       />
 

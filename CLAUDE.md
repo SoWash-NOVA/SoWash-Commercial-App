@@ -68,6 +68,7 @@ src/
 
 app/staff/                    OFFICE/STAFF mode (a second identity — see 2026-09-28 entry): Overview, Jobs, Chats
                                  (Support + Team), Clients, Account
+app/quotations/                Quotations (super admin only): index (list), [id] (form/preview/PDF). Logic in src/quotation/ (template.ts mirrors the web quotationTemplate.js)
 app/documentation/            Documentation menu: Site SLD, TBT, Safety Training
 app/generation/               Generation & PR: index (client centre), staff (all-clients centre, same component), view (the iNOVAA HTML report in a
                                  WebView), report/[id] (one published report). Shared UI: src/components/GenerationCentre / GenerationDashboard / GenerationParts
@@ -162,6 +163,7 @@ and `sowash-backend/routes/portalAuthRoutes.js` (login).
 | `GET /sld/:schedule_id` | the site's single-line diagram + pins + this visit's before/after photos per pin |
 | `GET/POST /notifications*`, `/push/register` | bell feed, unread count, mark-read, FCM registration |
 | `GET /generation/{plants,summary,daily,reports,reports/:id,reports/:id/data,calendar,range,view,inverter-picture/:id}` | Generation & PR for a client (published data only, EPC-aware): `calendar` = days that have data, `range` = one period's figures, `view` = the report HTML rebuilt for the period. STAFF equivalents (all clients, `?client_id=`) are `/api/generation/staff/{calendar,range,view}` |
+| `GET/POST/PUT/PATCH /quotations*` | saved quotations (web Sales > Quotations table). Super admin only from the app: `routes/quotationRoutes.js` `QUOTATION_APP_EMAILS` for `office_portal` tokens, mirrored in `src/quotation/access.ts`. Whole form in `data` jsonb; server recomputes totals |
 | `GET/POST /chat*` | the one support thread for this account (5s polling as the backup; LIVE via the socket since 2026-10-27, see §6 "Live Support chat"): `/chat`, `/chat/messages` (`limit`/`before_id` paging, `site_id`, `schedule_id` visit tag), `/chat/rings`, `/chat/typing`, `PUT /chat/messages/:mid/reaction`, `/chat/read`. **Reply-to (`reply_to_id`) not on the server yet** (patch + migration pending) |
 
 Staff mode (`app/staff/*`) uses the staff APIs instead — `/api/schedule/{history,stats,clients}`,
