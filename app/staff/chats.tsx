@@ -88,6 +88,7 @@ import {
   ChevronUp,
   CircleAlert,
   CircleCheck,
+  Info,
   RotateCcw,
   Clock,
   ImagePlus,
@@ -2597,6 +2598,7 @@ function MessageActionsOverlay({
   myEmoji,
   onReact,
   onReply,
+  onInfo,
   onDelete,
   onClose,
 }: {
@@ -2610,6 +2612,8 @@ function MessageActionsOverlay({
   onReact: (emoji: string) => void;
   /** Omit to hide the Reply row (Support chat has no reply-to-message yet). */
   onReply?: () => void;
+  /** Team chat, my own messages: opens "Message info" (who has seen it). */
+  onInfo?: () => void;
   /** Admin-only (Team chat) — omit to hide the Delete row. */
   onDelete?: () => void;
   onClose: () => void;
@@ -2632,7 +2636,7 @@ function MessageActionsOverlay({
 
   const { rect } = target;
   const PILL_H = 56;
-  const MENU_H = (onReply ? 52 : 0) + (onDelete ? 52 : 0) || 52;
+  const MENU_H = (onReply ? 52 : 0) + (onInfo ? 52 : 0) + (onDelete ? 52 : 0) || 52;
 
   let pillTop = 0;
   let menuTop = 0;
@@ -2705,12 +2709,18 @@ function MessageActionsOverlay({
                 </TouchableOpacity>
               </Animated.View>
 
-              {onReply || onDelete ? (
+              {onReply || onInfo || onDelete ? (
                 <Animated.View style={[s.actionMenu, side, { top: menuTop, opacity: pop }]}>
                   {onReply ? (
                     <TouchableOpacity style={s.actionRow} activeOpacity={0.7} onPress={onReply}>
                       <Reply size={18} color={palette.ink} />
                       <Text style={s.actionRowText}>Reply</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  {onInfo ? (
+                    <TouchableOpacity style={s.actionRow} activeOpacity={0.7} onPress={onInfo}>
+                      <Info size={18} color={palette.ink} />
+                      <Text style={s.actionRowText}>Info</Text>
                     </TouchableOpacity>
                   ) : null}
                   {onDelete ? (
@@ -2725,6 +2735,73 @@ function MessageActionsOverlay({
           )}
         </>
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * WhatsApp's "Message info" for a message I sent: who has read it, who has only received it, and who hasn't got it yet.
+ * Same data as the ticks (messageSeenStatus): each participant's last_read_at / last_delivered_at is a high-water mark,
+ * so a person "has read" the message once it is at or past the message's created_at. The exact read time of one
+ * message is not stored, so only names are listed.
+ */
+function MessageInfoSheet({
+  message,
+  conversation,
+  myUserId,
+  onClose,
+}: {
+  message: TeamMessage;
+  conversation: TeamConversationDetail | null;
+  myUserId: number | undefined;
+  onClose: () => void;
+}) {
+  useSheetBackButton(onClose);
+  const sentAt = new Date(message.created_at).getTime();
+  // Everyone except the sender; I have, by definition, seen a message that is on my screen.
+  const past = (p: TeamParticipant, v: string | null) => p.id === myUserId || (v != null && new Date(v).getTime() >= sentAt);
+  const others = (conversation?.participants ?? []).filter((p) => p.id !== message.sender_user_id);
+  const read = others.filter((p) => past(p, p.last_read_at));
+  const delivered = others.filter((p) => !past(p, p.last_read_at) && past(p, p.last_delivered_at));
+  const waiting = others.filter((p) => !past(p, p.last_read_at) && !past(p, p.last_delivered_at));
+  const groups: { title: string; people: TeamParticipant[]; color: string; icon: 'seen' | 'delivered' | 'sent' }[] = [
+    { title: `Read by (${read.length})`, people: read, color: s.tickSeen.color as string, icon: 'seen' },
+    { title: `Delivered to (${delivered.length})`, people: delivered, color: palette.muted, icon: 'delivered' },
+    { title: `Not delivered yet (${waiting.length})`, people: waiting, color: palette.muted, icon: 'sent' },
+  ];
+  return (
+    <View style={s.sheetOverlay}>
+      <Pressable style={s.sheetBackdrop} onPress={onClose}>
+        <Pressable style={[s.sheet, { maxHeight: '70%' }]} onPress={(e) => e.stopPropagation()}>
+          <View style={s.sheetHandle} />
+          <Text style={s.sheetTitle}>Message info</Text>
+          <Text style={s.sheetSub} numberOfLines={2}>
+            {message.body || (message.attachment_url ? 'Attachment' : '')}
+          </Text>
+          <ScrollView>
+            {others.length === 0 ? <Text style={s.sheetSub}>No one else is in this chat.</Text> : null}
+            {groups.map((g) =>
+              g.people.length === 0 ? null : (
+                <View key={g.title} style={{ marginTop: 10 }}>
+                  <Text style={[s.sheetTitle, { fontSize: 13, color: g.color }]}>{g.title}</Text>
+                  {g.people.map((p) => (
+                    <View key={p.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 }}>
+                      {g.icon === 'sent' ? (
+                        <Check size={16} color={palette.muted} />
+                      ) : (
+                        <CheckCheck size={16} color={g.color} />
+                      )}
+                      <Text style={{ fontSize: 15, fontWeight: '600', color: palette.ink }} numberOfLines={1}>
+                        {p.id === myUserId ? 'You' : p.name || 'Colleague'}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ),
+            )}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
     </View>
   );
 }
@@ -2861,6 +2938,8 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
   const [replyTo, setReplyTo] = useState<TeamMessage | null>(null);
   // The message whose reaction bar / Reply menu is open (long-press), with where it sits on screen.
   const [actionTarget, setActionTarget] = useState<{ message: TeamMessage; rect: ActionRect } | null>(null);
+  // "Message info": who has seen / received one of my messages.
+  const [infoMessage, setInfoMessage] = useState<TeamMessage | null>(null);
   const reactionsByMessage = useMemo(() => {
     const map = new Map<number, TeamReaction[]>();
     for (const r of reactions) {
@@ -3283,9 +3362,21 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
             setReplyTo(actionTarget.message);
             setActionTarget(null);
           }}
+          onInfo={
+            actionTarget.message.id > 0 && !actionTarget.message.pending
+              ? () => {
+                  setInfoMessage(actionTarget.message);
+                  setActionTarget(null);
+                }
+              : undefined
+          }
           onDelete={isAdmin && actionTarget.message.id > 0 ? () => confirmDelete(actionTarget.message) : undefined}
           onClose={() => setActionTarget(null)}
         />
+      ) : null}
+
+      {infoMessage ? (
+        <MessageInfoSheet message={infoMessage} conversation={conversation} myUserId={user?.id} onClose={() => setInfoMessage(null)} />
       ) : null}
 
       <View style={[s.composerWrap, { paddingBottom: composerClearance }]}>

@@ -14,7 +14,7 @@ import { useStaffClients } from '../../src/hooks';
 import { useAuth } from '../../src/auth/AuthContext';
 import PageHeader from '../../src/components/PageHeader';
 import KeyboardScreen from '../../src/components/KeyboardScreen';
-import { canUseQuotations } from '../../src/quotation/access';
+import { useQuotationAccess } from '../../src/quotation/access';
 import {
   MAX_ITEMS, MAX_TERMS, QuotationForm, QuotationStatus, STATUSES, baseQuoteNo, blankForm, getQuotation,
   nextQuoteNo, saveQuotation, setQuotationStatus, statusOf, stripRevision, todayIso,
@@ -71,7 +71,7 @@ function Section({ title, right, children }: { title: string; right?: React.Reac
 export default function QuotationFormScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const allowed = canUseQuotations(user?.email);
+  const { allowed, ready } = useQuotationAccess();
   const { id: idParam } = useLocalSearchParams<{ id: string }>();
   const openId = idParam && idParam !== 'new' ? Number(idParam) : null;
 
@@ -290,7 +290,11 @@ export default function QuotationFormScreen() {
     return (
       <View style={shared.screen}>
         <PageHeader title="Quotation" onBack={() => router.back()} />
-        <Text style={[s.empty, { color: palette.muted }]}>Quotations are available to the super admin only.</Text>
+        {ready ? (
+          <Text style={[s.empty, { color: palette.muted }]}>Quotations are not enabled for your account. Ask the super admin.</Text>
+        ) : (
+          <ActivityIndicator style={{ marginTop: 40 }} color={palette.muted} />
+        )}
       </View>
     );
   }

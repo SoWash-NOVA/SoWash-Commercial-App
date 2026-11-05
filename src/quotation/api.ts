@@ -134,3 +134,20 @@ export async function setQuotationStatus(id: number, status: QuotationStatus): P
   const { data } = await api.patch(`quotations/${id}/status`, { status });
   return data.quotation;
 }
+
+export interface AccessUser {
+  id: number;
+  name: string | null;
+  email: string | null;
+  type: string;
+  granted: boolean;
+}
+
+export async function listAccess(): Promise<AccessUser[]> {
+  const { data } = await api.get('quotations/access');
+  return data.users ?? [];
+}
+
+export async function setAccess(userId: number, granted: boolean): Promise<void> {
+  await api.put(`quotations/access/${userId}`, { granted });
+}

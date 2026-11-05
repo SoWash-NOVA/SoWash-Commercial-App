@@ -3,6 +3,14 @@
 Moved out of CLAUDE.md on 2026-10-20 (CLAUDE.md was 234k chars, over the 150k limit). Newest first. Read this file on demand when you need history; CLAUDE.md keeps only the stable map and a "Current state" block.
 
 
+## 2026-11-05 — Team chat: "Info" (who has read my message) + attendance wording
+- `app/staff/chats.tsx`: long-press one of MY messages -> new "Info" row opens `MessageInfoSheet`: Read by / Delivered to / Not delivered yet, from each participant's `last_read_at` / `last_delivered_at` (same data as the ticks; exact per-message read time is not stored, so names only). No backend change, JS-only.
+- `app/staff/jobs.tsx`: the visit sheet's Attendance shows "No attendance marked for this visit." when empty and "Out not marked" for a sign-in with no sign-out.
+
+## 2026-11-05 — Quotations: super admin can grant access to other departments
+- Backend `routes/quotationRoutes.js`: new table `quotation_app_access` (migration `docs/migrations/2026-11-05-quotation-app-access.sql`, run FIRST). An `office_portal` token passes if it is the super admin or has a row there (any STAFF_ROLES department, not only sales/admin); web access unchanged. New `GET /access/me` (any staff), `GET /access` + `PUT /access/:userId` (super admin only).
+- App: `src/quotation/access.ts` is now the `useQuotationAccess()` hook (server answer, cached per login) instead of an email list; new screen `app/quotations/access.tsx` (switch per staff user, reached from the "Access" button on the Quotations list, super admin only). Delete stays admin-only. JS-only, no new build.
+
 ## 10. Changelog — completed tasks
 
 Newest first. Each entry: what changed, in which file(s)/repo, and deploy status (this

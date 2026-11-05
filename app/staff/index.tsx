@@ -36,7 +36,7 @@ import {
 import { palette } from '../../src/theme';
 import { useStaffStats, useStaffJobs, dayKey, formatDateOnly, relativeDay, statusMeta, StaffStatsPeriod } from '../../src/hooks';
 import { useAuth } from '../../src/auth/AuthContext';
-import { canUseQuotations } from '../../src/quotation/access';
+import { useQuotationAccess } from '../../src/quotation/access';
 import { useStaffScope } from '../../src/staff-context';
 import PageHeader from '../../src/components/PageHeader';
 import FadeInRow from '../../src/components/FadeInRow';
@@ -83,6 +83,7 @@ function dateParts(value: string | null | undefined): { day: string; month: stri
 export default function StaffOverviewScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const quoteAccess = useQuotationAccess();
   const { setSelectedClientId } = useStaffScope();
   const [period, setPeriod] = useState<StaffStatsPeriod>('month');
   const stats = useStaffStats(period);
@@ -125,7 +126,7 @@ export default function StaffOverviewScreen() {
         subtitle="Here's what's happening across every client."
         right={
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            {canUseQuotations(user?.email) ? (
+            {quoteAccess.allowed ? (
               <TouchableOpacity
                 onPress={() => router.push('/quotations' as never)}
                 style={s.genBtn}

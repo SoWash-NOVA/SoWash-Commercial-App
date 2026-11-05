@@ -614,7 +614,12 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
             <PhotoRow title="After" urls={afterUrls} ready={ready} />
             <PhotoRow title="Toolbox talk (TBT)" urls={tbtUrls} ready={ready} />
 
-            {attendance.length > 0 ? (
+            {attendance.length === 0 ? (
+              <>
+                <Text style={detail.sectionTitle}>ATTENDANCE</Text>
+                <Text style={detail.attendanceTimes}>No attendance marked for this visit.</Text>
+              </>
+            ) : (
               <>
                 <Text style={detail.sectionTitle}>ATTENDANCE</Text>
                 <View style={{ gap: 8 }}>
@@ -634,7 +639,7 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
                           </View>
                           <Text style={detail.attendanceTimes}>
                             In {formatDateTime(a.clock_in_at)}
-                            {a.clock_out_at ? `  ·  Out ${formatDateTime(a.clock_out_at)}` : ''}
+                            {a.clock_out_at ? `  ·  Out ${formatDateTime(a.clock_out_at)}` : '  ·  Out not marked'}
                           </Text>
                           <Text style={detail.attendanceStatus}>{a.status}</Text>
                         </View>
@@ -671,7 +676,7 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
                   }}
                 />
               </>
-            ) : null}
+            )}
 
             {findings.length > 0 || fsrUrls.length > 0 ? (
               <>

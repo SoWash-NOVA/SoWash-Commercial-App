@@ -5,12 +5,12 @@ import {
   ActivityIndicator, Alert, FlatList, RefreshControl, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { FileText, Plus, Search, Share2 } from 'lucide-react-native';
+import { FileText, Plus, Search, Share2, Users } from 'lucide-react-native';
 import { styles as shared, palette } from '../../src/theme';
 import { errorMessage } from '../../src/api/client';
 import { useAuth } from '../../src/auth/AuthContext';
 import PageHeader from '../../src/components/PageHeader';
-import { canUseQuotations } from '../../src/quotation/access';
+import { useQuotationAccess } from '../../src/quotation/access';
 import { QuotationRow, STATUSES, getQuotation, listQuotations, setQuotationStatus, statusOf } from '../../src/quotation/api';
 import { shareQuotationPdf } from '../../src/quotation/pdf';
 import { formatDateOnly } from '../../src/hooks';
@@ -20,7 +20,7 @@ const money = (n: string | number) => Math.round(Number(n) || 0).toLocaleString(
 export default function QuotationsScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const allowed = canUseQuotations(user?.email);
+  const { allowed, canManage, ready } = useQuotationAccess();
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
   const [rows, setRows] = useState<QuotationRow[]>([]);
@@ -98,7 +98,11 @@ export default function QuotationsScreen() {
     return (
       <View style={shared.screen}>
         <PageHeader title="Quotations" onBack={() => router.back()} />
-        <Text style={[s.empty, { color: palette.muted }]}>Quotations are available to the super admin only.</Text>
+        {ready ? (
+          <Text style={[s.empty, { color: palette.muted }]}>Quotations are not enabled for your account. Ask the super admin.</Text>
+        ) : (
+          <ActivityIndicator style={{ marginTop: 40 }} color={palette.muted} />
+        )}
       </View>
     );
   }
@@ -110,10 +114,18 @@ export default function QuotationsScreen() {
         subtitle="Create and manage client quotations"
         onBack={() => router.back()}
         right={
-          <TouchableOpacity style={s.newBtn} onPress={() => router.push('/quotations/new' as never)} accessibilityLabel="New quotation">
-            <Plus size={16} color="#fff" />
-            <Text style={s.newBtnText}>New</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {canManage ? (
+              <TouchableOpacity style={s.newBtn} onPress={() => router.push('/quotations/access' as never)} accessibilityLabel="Who can use Quotations">
+                <Users size={16} color="#fff" />
+                <Text style={s.newBtnText}>Access</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity style={s.newBtn} onPress={() => router.push('/quotations/new' as never)} accessibilityLabel="New quotation">
+              <Plus size={16} color="#fff" />
+              <Text style={s.newBtnText}>New</Text>
+            </TouchableOpacity>
+          </View>
         }
       />
 
