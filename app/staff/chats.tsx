@@ -55,7 +55,7 @@ import { Image } from 'expo-image';
 import ChatAttachment, { ChatPhoto } from '../../src/components/ChatAttachment';
 import ZoomableImage from '../../src/components/ZoomableImage';
 import { CameraPillButton, openCameraCapture } from '../../src/camera-capture';
-import { pickChatPhoto } from '../../src/photoPicker';
+import { pickChatPhoto, pickChatPhotos } from '../../src/photoPicker';
 import { DueBadge, DueBanner, TIMELINES, timelineMinutes, useNow } from '../../src/chatDue';
 import { isChatAdmin } from '../../src/chatAdmins';
 import { useVoiceHold, VoiceMicButton, VoiceRecordingBar } from '../../src/voiceRecorder';
@@ -2902,8 +2902,11 @@ function TeamThreadView({ conversationId, onBack }: { conversationId: number; on
       {
         text: 'Picture from Gallery',
         onPress: async () => {
-          const p = await pickChatPhoto('library');
-          if (p) setPhoto(p);
+          // Several pictures can be ticked: one opens in the composer (add a caption),
+          // more than one are sent straight away, one message each, in the order picked.
+          const picked = await pickChatPhotos(10);
+          if (picked.length === 1) setPhoto(picked[0]);
+          else for (const p of picked) await sendMedia(p);
         },
       },
       { text: 'Document from phone', onPress: () => void uploadAndSendFile() },

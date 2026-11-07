@@ -21,7 +21,9 @@ import { keep } from './themeEngine';
 export type Consent = 'granted' | 'declined' | null;
 
 const DISCLOSURE_VERSION = 1;
-const key = (userId: number) => `phonebookConsent:${userId}`;
+// SecureStore keys may only contain letters, digits, '.', '-' and '_' - a ':' made every save throw (swallowed
+// below), so 'Agree' was never remembered and the disclosure came back on every launch.
+const key = (userId: number) => `phonebookConsent.${userId}`;
 
 export async function getConsent(userId: number): Promise<Consent> {
   try {

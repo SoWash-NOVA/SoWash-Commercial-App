@@ -26,6 +26,7 @@ import { useAccent } from '../../src/theme-context';
 import { useJobDetail, useSldWalkthrough, sldHasWalk } from '../../src/hooks';
 import JobDetailBody, { detailStyles } from '../../src/components/JobDetailBody';
 import PageHeader from '../../src/components/PageHeader';
+import { useScreenshot, ScreenshotButton } from '../../src/screenshot';
 
 export default function JobDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -34,6 +35,7 @@ export default function JobDetailScreen() {
   const { data, loading, error, refreshing, refresh } = useJobDetail(id ?? null);
   const { data: sld } = useSldWalkthrough(id ?? null);
 
+  const shot = useScreenshot();
   const job = data?.job;
   const walkPoints = sldHasWalk(sld)
     ? (sld?.points ?? []).filter((p) => p.before_url || p.after_url).length
@@ -41,7 +43,11 @@ export default function JobDetailScreen() {
 
   return (
     <View style={styles.screen}>
-      <PageHeader title="Visit details" onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+      <PageHeader
+        title="Visit details"
+        onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+        right={job ? <ScreenshotButton onPress={shot.take} busy={shot.busy} /> : undefined}
+      />
 
       {loading && !data ? (
         <View style={detailStyles.centre}>
@@ -64,16 +70,19 @@ export default function JobDetailScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={accent} />
           }
         >
-          <JobDetailBody
-            job={job}
-            walkPoints={walkPoints}
-            onWalk={() =>
-              router.push({
-                pathname: '/walkthrough/[id]',
-                params: { id: String(id), site: job.site_name ?? '' },
-              })
-            }
-          />
+          {/* The screenshot captures this wrapper = the whole report, not just the visible part. */}
+          <View ref={shot.ref} collapsable={false} style={{ backgroundColor: palette.bg }}>
+            <JobDetailBody
+              job={job}
+              walkPoints={walkPoints}
+              onWalk={() =>
+                router.push({
+                  pathname: '/walkthrough/[id]',
+                  params: { id: String(id), site: job.site_name ?? '' },
+                })
+              }
+            />
+          </View>
         </ScrollView>
       )}
     </View>

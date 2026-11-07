@@ -453,9 +453,21 @@ export function formatDateOnly(value: string | null | undefined): string {
 }
 
 /** A timestamp column → "4 Aug, 14:30" in Pakistan time. */
+/**
+ * A timestamp from the API as a real instant. Columns the server nests inside json_agg (e.g. the staff
+ * visit sheet's attendance clock_in_at / clock_out_at) arrive as "2026-07-22T02:22:57.494" with NO zone;
+ * the columns hold UTC, so they are tagged Z first (same rule as the web console's helpers/time.js).
+ * Without this `new Date()` reads them as the phone's local time and shows them 5 hours early.
+ */
+function toInstant(value: string): Date {
+  let s = String(value).trim();
+  if (/^\d{4}-\d\d-\d\d[T ]\d\d:\d\d/.test(s) && !/([zZ]|[+-]\d\d:?\d\d)$/.test(s)) s = `${s.replace(' ', 'T')}Z`;
+  return new Date(s);
+}
+
 export function formatDateTime(value: string | null | undefined): string {
   if (!value) return '—';
-  const dt = new Date(value);
+  const dt = toInstant(value);
   if (Number.isNaN(dt.getTime())) return '—';
   return dt.toLocaleString('en-PK', {
     day: 'numeric',
@@ -469,7 +481,7 @@ export function formatDateTime(value: string | null | undefined): string {
 /** A timestamp column → "14:30" in Pakistan time. */
 export function formatTime(value: string | null | undefined): string {
   if (!value) return '—';
-  const dt = new Date(value);
+  const dt = toInstant(value);
   if (Number.isNaN(dt.getTime())) return '—';
   return dt.toLocaleTimeString('en-PK', {
     hour: '2-digit',

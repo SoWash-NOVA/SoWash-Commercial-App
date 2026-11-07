@@ -3,6 +3,16 @@
 Moved out of CLAUDE.md on 2026-10-20 (CLAUDE.md was 234k chars, over the 150k limit). Newest first. Read this file on demand when you need history; CLAUDE.md keeps only the stable map and a "Current state" block.
 
 
+## 2026-11-07 — Screenshot of a visit report (client + staff) + multi-picture upload in Team chat (typecheck clean; NOT seen on a device; screenshot needs a NEW BUILD)
+- New `src/screenshot.tsx` (`useScreenshot`, `ScreenshotButton`): captures the whole visit report (also the part scrolled off screen) as one PNG with `react-native-view-shot` (new dependency, native module -> new EAS build) and opens the share sheet (save to gallery / WhatsApp / anywhere). Camera button in the header of the client `app/job/[id].tsx` and next to "send to chat" on the staff visit sheet in `app/staff/jobs.tsx`.
+- Team DM / group (`app/staff/chats.tsx`, `src/photoPicker.ts` `pickChatPhotos`): paperclip > "Picture from Gallery" now allows ticking up to 10 pictures. One picture opens in the composer (caption); several are sent straight away, one message each, in picked order (not a grouped album). JS-only. The client Support chat and staff Support threads still pick one at a time.
+
+## 2026-11-07 (later) — Phone Book consent popup came back on every launch
+- `src/phonebookConsent.tsx`: the SecureStore key was `phonebookConsent:<id>`; ':' is not a valid SecureStore key character, so `setItemAsync` threw (swallowed) and the choice was never stored. Key is now `phonebookConsent.<id>`. After this update the user taps Agree once more and it is remembered. JS-only.
+
+## 2026-11-07 (later) — Attendance in/out times matched to the web portal
+- `formatDateTime` / `formatTime` (`src/hooks.ts`) now go through `toInstant()`: a zone-less timestamp string ("2026-07-22T02:22:57.494", which is how `json_agg` sends the staff visit sheet's attendance `clock_in_at`/`clock_out_at`) is tagged UTC before parsing, exactly like the web `helpers/time.js`. Before, the phone read it as local time and showed it 5 h early. JS-only. The screenshot "RNViewShot is undefined" error = the installed build predates `react-native-view-shot`; a new EAS build fixes it.
+
 ## 2026-11-05 — Team chat: "Info" (who has read my message) + attendance wording
 - `app/staff/chats.tsx`: long-press one of MY messages -> new "Info" row opens `MessageInfoSheet`: Read by / Delivered to / Not delivered yet, from each participant's `last_read_at` / `last_delivered_at` (same data as the ticks; exact per-message read time is not stored, so names only). No backend change, JS-only.
 - `app/staff/jobs.tsx`: the visit sheet's Attendance shows "No attendance marked for this visit." when empty and "Out not marked" for a sign-in with no sign-out.

@@ -505,6 +505,7 @@ about the backend checkout being stale):
 
 ## 10. Current state and changelog
 
+- **2026-11-07:** visit-report screenshot button (`src/screenshot.tsx`, client visit screen + staff visit sheet) uses `react-native-view-shot` -> needs a new EAS build; Team chat gallery picks several pictures at once (`pickChatPhotos`). Details in `docs/CHANGELOG.md`.
 - **Staff Phone Book consent (Google Play User Data policy, 2026-11-02):** contacts are personal data that the Phone Book UPLOADS, so `src/phonebook.ts` never reads them (or even asks Android for the permission) until the staff user tapped 'Agree' on the in-app disclosure (`src/phonebookConsent.tsx`, shown by `app/staff/_layout.tsx` when the staff app opens; versioned per-user choice in SecureStore). Back/home/tap-away is not consent. Changing the disclosure wording materially = bump `DISCLOSURE_VERSION`. Privacy policy (app + docs html) and the Play Data safety / Contacts declaration must keep saying the same. 1.0.2 was rejected for the missing disclosure; 1.0.3 is the compliant version.
 - **2026-11-02 snapshot:** Generation & PR is feature-complete and LIVE on the server: all SQL (EPC, reports, inverters, curves, pictures, iNovaa Ai bot + alerts,
   pr_target), `generation_service` with `/render`, and the backend files (generationRoutes / generationPortalRoutes / generationViews / generationAlerts /

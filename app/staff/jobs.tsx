@@ -60,6 +60,7 @@ import { useStaffJobs, formatDateOnly, formatDateTime, statusMeta, stageIndex, S
 import { photoUrl, photoUrls } from '../../src/api/client';
 import { StaffJob } from '../../src/api/types';
 import PageHeader from '../../src/components/PageHeader';
+import { useScreenshot, ScreenshotButton } from '../../src/screenshot';
 import ChatTargetSheet from '../../src/components/ChatTargetSheet';
 import { sharePhotoToConversation, sharePhotoExternally } from '../../src/jobShare';
 import { shareJobToConversation } from '../../src/jobShare';
@@ -498,6 +499,7 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
   const meta = statusMeta(job.status);
   const pending = isPendingApproval(job);
   const [sharing, setSharing] = useState(false);
+  const shot = useScreenshot();
   // The popup opens instantly with its text; the photos mount once the slide-in has finished.
   const ready = useAfterOpen();
 
@@ -575,6 +577,7 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
                 {job.client_name || ''}
               </Text>
             </View>
+            <ScreenshotButton onPress={shot.take} busy={shot.busy} color={accent} />
             <TouchableOpacity onPress={() => setSharing(true)} hitSlop={10} style={detail.close} accessibilityLabel="Send visit to chat">
               <MessageSquarePlus size={18} color={accent} />
             </TouchableOpacity>
@@ -589,6 +592,7 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
             showsVerticalScrollIndicator={false}
             nestedScrollEnabled
           >
+            <View ref={shot.ref} collapsable={false} style={{ backgroundColor: palette.bg }}>
             <View style={detail.factGrid}>
               <Fact label="Status" value={meta.label} />
               <Fact label="Scheduled" value={formatDateOnly(job.scheduled_date)} />
@@ -704,6 +708,7 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
                 <Text style={detail.noteText}>{job.notes}</Text>
               </>
             ) : null}
+            </View>
           </ScrollView>
         </View>
       </View>

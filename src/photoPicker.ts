@@ -42,6 +42,32 @@ export async function pickChatPhoto(source: 'camera' | 'library'): Promise<ChatP
   }
 }
 
+/**
+ * Gallery picker that lets several pictures be ticked at once (WhatsApp-style, up to `limit`).
+ * Returns [] on a denied permission or a cancelled picker.
+ */
+export async function pickChatPhotos(limit = 10): Promise<ChatPhotoInput[]> {
+  try {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return [];
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.7,
+      allowsMultipleSelection: true,
+      selectionLimit: limit,
+      orderedSelection: true,
+    });
+    if (result.canceled || !result.assets?.length) return [];
+    return result.assets.map((a, i) => ({
+      uri: a.uri,
+      name: a.fileName ?? `photo-${Date.now()}-${i}.jpg`,
+      mimeType: a.mimeType ?? 'image/jpeg',
+    }));
+  } catch {
+    return [];
+  }
+}
+
 /** The "take photo / choose from library" prompt every composer's photo-attach button shows. */
 export function promptChatPhotoSource(
   /** Receives what the camera captured (the composers send it straight away, like WhatsApp). */
