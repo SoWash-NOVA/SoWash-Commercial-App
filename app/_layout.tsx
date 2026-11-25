@@ -54,7 +54,7 @@ const STAFF_STACK_SEGMENTS = ['phonebook', 'files'];
 // 'quotations' is staff-only in practice (super admin; each screen and the server re-check) but opens outside /staff like generation.
 // 'generation' is used by both: a client's own Generation & PR (index, report, view) and staff's all-clients view (generation/staff);
 // without it the staff guard bounced every tap on the staff Generation button straight back to /staff.
-const SHARED_STACK_SEGMENTS = ['change-password', 'generation', 'quotations'];
+const SHARED_STACK_SEGMENTS = ['change-password', 'generation', 'quotations', 'job-chat'];
 
 function RootNavigator() {
   const { status, appRole } = useAuth();

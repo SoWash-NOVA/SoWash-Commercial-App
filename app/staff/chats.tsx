@@ -31,6 +31,7 @@
 import { useChatScroll } from '../../src/useChatScroll';
 import { useChatSurface } from '../../src/chat-focus';
 import KeyboardScreen from '../../src/components/KeyboardScreen';
+import GeneralChat from '../../src/components/GeneralChat';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -117,6 +118,7 @@ import {
   useStaffDirectory,
   useTeamConversations,
   subscribeUnread,
+  useJobChatUnread,
   useTeamConversation,
   startTeamDm,
   createTeamGroup,
@@ -467,6 +469,9 @@ function teamPreviewPrefix(conversation: TeamConversation, myUserId: number | un
   return conversation.last_sender_name ? `${conversation.last_sender_name}: ` : '';
 }
 
+type Section = 'support' | 'team' | 'visits';
+const SECTION_LABEL: Record<Section, string> = { support: 'Support', team: 'Team', visits: 'Site Chat' };
+
 /** The top of both list screens — a coloured title bar with a Support / Team switch. */
 function ChatsHeader({
   section,
@@ -474,14 +479,15 @@ function ChatsHeader({
   unread = 0,
   mentions = 0,
 }: {
-  section: 'support' | 'team';
-  onChangeSection: (section: 'support' | 'team') => void;
+  section: Section;
+  onChangeSection: (section: Section) => void;
   /** Conversations with something unread — shown as a live chip in the header. */
   unread?: number;
   /** Unread @-mentions of me. */
   mentions?: number;
 }) {
   const { accent } = useAccent();
+  const { unread: visitUnread } = useJobChatUnread();
   return (
     <ChatHeaderBar
       rounded
@@ -489,7 +495,7 @@ function ChatsHeader({
     >
       <Text style={s.listTitle}>Chats</Text>
       <Text style={s.listSub}>
-        {section === 'support' ? 'Client support conversations' : 'Talk with your colleagues'}
+        {section === 'support' ? 'Client support conversations' : section === 'visits' ? 'Site supervisors ↔ clients ↔ SoWash office (tag people with @)' : 'Talk with your colleagues'}
       </Text>
       <View style={s.statRow}>
         <View style={s.statChip}>
@@ -504,7 +510,7 @@ function ChatsHeader({
         ) : null}
       </View>
       <View style={s.segment}>
-        {(['support', 'team'] as const).map((sec) => {
+        {(['support', 'team', 'visits'] as const).map((sec) => {
           const active = sec === section;
           return (
             <TouchableOpacity
@@ -514,7 +520,8 @@ function ChatsHeader({
               activeOpacity={0.85}
             >
               <Text style={[s.segmentText, active && { color: accent }]}>
-                {sec === 'support' ? 'Support' : 'Team'}
+                {SECTION_LABEL[sec]}
+                {sec === 'visits' && visitUnread > 0 ? `  ●${visitUnread > 99 ? '99+' : visitUnread}` : ''}
               </Text>
             </TouchableOpacity>
           );
@@ -529,12 +536,17 @@ export default function StaffChatsScreen() {
   // as /staff/chats?team=<conversationId> — this screen has no per-
   // conversation route, so a query param is how a tap from the tray opens
   // the right conversation instead of just the Team list.
-  const params = useLocalSearchParams<{ team?: string }>();
+  const params = useLocalSearchParams<{ team?: string; section?: string }>();
 
-  const [section, setSection] = useState<'support' | 'team'>('support');
+  const [section, setSection] = useState<Section>('support');
   const [activeThreadId, setActiveThreadId] = useState<number | null>(null);
   const [activeThreadName, setActiveThreadName] = useState<string>('');
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
+
+  // A general_chat_staff push lands here as /staff/chats?section=site -> open the Site Chat section.
+  useEffect(() => {
+    if (params.section === 'site') setSection('visits');
+  }, [params.section]);
 
   useEffect(() => {
     const id = params.team ? Number(params.team) : null;
@@ -545,10 +557,15 @@ export default function StaffChatsScreen() {
   }, [params.team]);
 
   // A chat is open → hide the tab bar and make Android back return to the list (not Overview).
-  useChatSurface(section === 'team' ? !!activeConversationId : !!activeThreadId, () => {
+  useChatSurface(section === 'team' ? !!activeConversationId : section === 'visits' ? false : !!activeThreadId, () => {
     if (section === 'team') setActiveConversationId(null);
     else setActiveThreadId(null);
   });
+
+  if (section === 'visits') {
+    // Site Chat (supervisor <-> client <-> office): client inbox + room switch in place inside GeneralChat.
+    return <GeneralChat mode="staff" header={<ChatsHeader section={section} onChangeSection={setSection} />} />;
+  }
 
   if (section === 'team') {
     if (activeConversationId) {
@@ -640,8 +657,8 @@ function ThreadList({
   onChangeSection,
   onOpen,
 }: {
-  section: 'support' | 'team';
-  onChangeSection: (section: 'support' | 'team') => void;
+  section: Section;
+  onChangeSection: (section: Section) => void;
   onOpen: (thread: StaffChatThread) => void;
 }) {
   const { accent } = useAccent();
@@ -835,8 +852,8 @@ function TeamList({
   onChangeSection,
   onOpen,
 }: {
-  section: 'support' | 'team';
-  onChangeSection: (section: 'support' | 'team') => void;
+  section: Section;
+  onChangeSection: (section: Section) => void;
   /** Just the id — a list row and a freshly created conversation are different shapes, but both always have this. */
   onOpen: (conversationId: number) => void;
 }) {

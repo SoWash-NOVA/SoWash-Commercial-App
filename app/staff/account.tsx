@@ -8,7 +8,7 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Alert, StyleSheet } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { fetchSummary } from '../../src/phonebook';
-import { BookUser, ChevronRight, FolderOpen, KeyRound, LogOut, Mail, Shield } from 'lucide-react-native';
+import { BookUser, ChevronRight, FolderOpen, KeyRound, LogOut, Mail, MessageSquare, Shield } from 'lucide-react-native';
 import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useAuth, initialsOf } from '../../src/auth/AuthContext';
@@ -93,6 +93,21 @@ export default function StaffAccountScreen() {
               <Text style={local.linkBadgeText}>{waiting}</Text>
             </View>
           ) : null}
+          <ChevronRight size={18} color={palette.mutedLight} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[local.card, local.linkRow]}
+          activeOpacity={0.85}
+          onPress={() => router.push('/staff/chats?section=site' as never)}
+        >
+          <View style={[local.linkIcon, { backgroundColor: `${accent}14` }]}>
+            <MessageSquare size={18} color={accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={local.linkTitle}>Site Chat</Text>
+            <Text style={local.linkSub}>Site supervisors, clients and office in one chat</Text>
+          </View>
           <ChevronRight size={18} color={palette.mutedLight} />
         </TouchableOpacity>
 

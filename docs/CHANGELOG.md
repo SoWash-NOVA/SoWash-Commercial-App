@@ -3,6 +3,18 @@
 Moved out of CLAUDE.md on 2026-10-20 (CLAUDE.md was 234k chars, over the 150k limit). Newest first. Read this file on demand when you need history; CLAUDE.md keeps only the stable map and a "Current state" block.
 
 
+## 2026-11-24 (later) — Full-screen photo opens fast (typecheck clean; NOT seen on a device)
+Cause: the viewer (ZoomableImage) loaded the multi-MB camera ORIGINAL with no placeholder. Now: opens on the small cached tile copy (placeholder), loads a screen-sized server copy (thumbUrl(uri, width) = ?w=1200, ~100-300 KB), and fetches the original only once the reader zooms in. PhotoViewerModal prefetches the next/previous photos; PhotoStripList starts the fetch on press-in. Needs the backend middleware/uploadThumbs.js (already mounted) - other URLs fall back to the original. JS-only.
+
+## 2026-11-24 (later) — Job lists load faster (typecheck clean; NOT seen on a device)
+Client Visits: rows memoised; the focus refetch is throttled to once per 30 s (the first focus used to repeat the mount fetch, x2 requests); the Completed chip uses the server past scope instead of the full list. Staff Jobs: search is debounced 400 ms (it fired a request per keystroke); rows memoised (JobRow); list renders 30 at a time and loads more on scroll. JS-only.
+
+## 2026-11-24 — Attendance in/out 1 hour off vs the web console: fixed on the BACKEND (NOT deployed yet)
+Cause: attendance.clock_in_at/clock_out_at are timestamp WITHOUT time zone, written in the Node server local time (VPS zone is not UTC and apparently has DST: +2 summer / +1 winter). The staff /schedule/history json_agg sends them as bare digits, so the app (which tagged them UTC) could never match the web, whose attendance pages get node-postgres-parsed ISO instants. Fix: routes/schedulingRoutes.js (sowash-backend) now loads attendance in a second query and replaces row.attendance, so the times arrive as proper ISO instants (Z) and the app shows PKT correctly (toInstant in src/hooks.ts leaves zoned strings alone). App code unchanged. Deploy: upload routes/schedulingRoutes.js, pm2 restart. Client route customerJobHistoryRoutes.js has the same json_agg but the client UI hides attendance times.
+
+## 2026-11-24 — Status filter chips on the job lists (client Visits + staff Jobs) (typecheck clean; NOT seen on a device)
+New shared src/components/StatusFilterBar.tsx (All / Scheduled / Ongoing / Completed / Cancelled, with counts) + matchesStatusFilter()/STATUS_FILTERS in src/hooks.ts. Client app/(tabs)/jobs.tsx: chip row under the scope tabs; picking a status switches scope to All and filters the loaded rows; Overview deep links (status=in_progress) map to Ongoing; the old clearable chip was removed. Staff app/staff/jobs.tsx: chip row under the search box, client-side filter. JS-only, no new build.
+
 ## 2026-11-07 — Screenshot of a visit report (client + staff) + multi-picture upload in Team chat (typecheck clean; NOT seen on a device; screenshot needs a NEW BUILD)
 - New `src/screenshot.tsx` (`useScreenshot`, `ScreenshotButton`): captures the whole visit report (also the part scrolled off screen) as one PNG with `react-native-view-shot` (new dependency, native module -> new EAS build) and opens the share sheet (save to gallery / WhatsApp / anywhere). Camera button in the header of the client `app/job/[id].tsx` and next to "send to chat" on the staff visit sheet in `app/staff/jobs.tsx`.
 - Team DM / group (`app/staff/chats.tsx`, `src/photoPicker.ts` `pickChatPhotos`): paperclip > "Picture from Gallery" now allows ticking up to 10 pictures. One picture opens in the composer (caption); several are sent straight away, one message each, in picked order (not a grouped album). JS-only. The client Support chat and staff Support threads still pick one at a time.
@@ -2335,3 +2347,18 @@ date off-by-one bug described above is still live on the deployed server.**
 
 ---
 
+
+---
+
+## 2026-11-18 — Job Chat (per-visit chat: site supervisor ↔ client ↔ office) — in the working tree, not built/deployed
+
+New: `src/components/JobChatRoom.tsx`, `app/job-chat/[id].tsx` (room), `app/job-chat/index.tsx` (list). Text, photo and
+voice (hold-to-record via `useVoiceHold`, played by `ChatAttachment`). 5 s poll while open; optimistic send with
+tap-to-retry (`client_msg_id` makes a retry idempotent). Entry points: chat icon on the client visit screen
+(`app/job/[id].tsx`), chat icon on the staff visit sheet (`app/staff/jobs.tsx`), "Visit chats" rows in client Profile
+and staff Account, and push taps (`job_chat` → `/job-chat/<schedule_id>` in `notificationTarget`, `src/hooks.ts`).
+`'job-chat'` was added to `SHARED_STACK_SEGMENTS` in `app/_layout.tsx` (both identities use it).
+Backend: `sowash-backend/routes/jobChatRoutes.js` (mounted at `/api/customer-portal/job-chat`) + migration
+`docs/migrations/2026-11-18-job-chat.sql`; full design, rules and deploy order in `sowash-backend/docs/job-chat.md`.
+It is a SEPARATE room per visit, not the support thread — the support chat is untouched. Needs a new EAS build; run the
+migration and upload the backend files FIRST. Backups of the edited files: `.claude-backups/*.20261118.bak`.

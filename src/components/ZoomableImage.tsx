@@ -6,8 +6,10 @@
 // in this project — see CLAUDE.md §6).
 
 import React, { useState } from 'react';
-import { Animated } from 'react-native';
+import { ActivityIndicator, Animated, View } from 'react-native';
+
 import { Image } from 'expo-image';
+import { thumbUrl } from '../api/client';
 import { PanGestureHandler, PinchGestureHandler, State, TapGestureHandler } from 'react-native-gesture-handler';
 
 const ZOOM_MIN = 1;
@@ -41,6 +43,13 @@ export default function ZoomableImage({
   const baseScale = React.useRef(1);
   const baseTranslate = React.useRef({ x: 0, y: 0 });
   const [isZoomed, setIsZoomed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  // The camera original is several MB and was the whole wait. Open on the small copy the tile already
+  // cached (instant), swap to a screen-sized server copy (~100-300 KB), and fetch the original only when
+  // the reader actually zooms in.
+  const preview = thumbUrl(uri, 130);
+  const screenSized = thumbUrl(uri, width);
+  const source = isZoomed ? uri : screenSized;
 
   const pinchRef = React.useRef(null);
   const panRef = React.useRef(null);
@@ -135,7 +144,22 @@ export default function ZoomableImage({
                   { transform: [{ translateX }, { translateY }, { scale }] },
                 ]}
               >
-                <Image source={{ uri }} style={{ width, height }} contentFit="contain" />
+                <Image
+                  source={{ uri: source }}
+                  placeholder={{ uri: preview }}
+                  placeholderContentFit="contain"
+                  style={{ width, height }}
+                  contentFit="contain"
+                  cachePolicy="memory-disk"
+                  priority="high"
+                  transition={120}
+                  onLoad={() => setLoaded(true)}
+                />
+                {!loaded ? (
+                  <View pointerEvents="none" style={{ position: 'absolute', alignItems: 'center', justifyContent: 'center' }}>
+                    <ActivityIndicator color="#fff" />
+                  </View>
+                ) : null}
               </Animated.View>
             </PanGestureHandler>
           </Animated.View>

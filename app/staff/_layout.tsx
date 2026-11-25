@@ -34,7 +34,7 @@ import { Tabs } from 'expo-router';
 import { Building2, ClipboardList, LayoutGrid, MessagesSquare, User } from 'lucide-react-native';
 import FloatingTabBar, { FloatingTabItem } from '../../src/components/FloatingTabBar';
 import { StaffScopeProvider } from '../../src/staff-context';
-import { useStaffChatUnread, useTeamUnread } from '../../src/hooks';
+import { useJobChatUnread, useStaffChatUnread, useTeamUnread } from '../../src/hooks';
 import { startTeamSocket, stopTeamSocket } from '../../src/teamChatSocket';
 import { useAuth } from '../../src/auth/AuthContext';
 import { autoBackup } from '../../src/phonebook';
@@ -62,6 +62,7 @@ function StaffTabBar(props: {
 }) {
   const { unread: supportUnread } = useStaffChatUnread();
   const { unread: teamUnread } = useTeamUnread();
+  const { unread: visitUnread } = useJobChatUnread();
   return (
     <FloatingTabBar
       state={props.state}
@@ -74,7 +75,7 @@ function StaffTabBar(props: {
       order={ORDER as unknown as string[]}
       items={META}
       centreName={CENTRE_NAME}
-      centreBadge={supportUnread + teamUnread}
+      centreBadge={supportUnread + teamUnread + visitUnread}
     />
   );
 }

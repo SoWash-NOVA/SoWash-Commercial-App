@@ -24,7 +24,7 @@
 // columns, so there is no second request, matching the "one card, one fetch"
 // shape ChatVisitCard.tsx uses for its own popup.
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -41,12 +41,14 @@ import {
   Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { router as appRouter } from 'expo-router';
 import {
   Building2,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
   CircleAlert,
+  MessageSquare,
   MessageSquarePlus,
   Search,
   UserCheck,
@@ -56,10 +58,11 @@ import {
 import { palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useStaffScope } from '../../src/staff-context';
-import { useStaffJobs, formatDateOnly, formatDateTime, statusMeta, stageIndex, STAGES } from '../../src/hooks';
+import { useStaffJobs, formatDateOnly, formatDateTime, statusMeta, stageIndex, STAGES, matchesStatusFilter, StatusFilterKey } from '../../src/hooks';
 import { photoUrl, photoUrls } from '../../src/api/client';
 import { StaffJob } from '../../src/api/types';
 import PageHeader from '../../src/components/PageHeader';
+import { StatusFilterBar } from '../../src/components/StatusFilterBar';
 import { useScreenshot, ScreenshotButton } from '../../src/screenshot';
 import ChatTargetSheet from '../../src/components/ChatTargetSheet';
 import { sharePhotoToConversation, sharePhotoExternally } from '../../src/jobShare';
@@ -242,10 +245,53 @@ function ClientIndex() {
  * Level 2 — one client's jobs
  * ==================================================================== */
 
+/** One job row, memoised: typing in search / changing a chip no longer re-renders every row. */
+const JobRow = React.memo(function JobRow({
+  item,
+  onOpen,
+  onMenu,
+}: {
+  item: StaffJob;
+  onOpen: (j: StaffJob) => void;
+  onMenu: (j: StaffJob) => void;
+}) {
+  const meta = statusMeta(item.status);
+  const pending = isPendingApproval(item);
+  return (
+    <TouchableOpacity style={s.card} activeOpacity={0.85} onPress={() => onOpen(item)} onLongPress={() => onMenu(item)} delayLongPress={350}>
+      <View style={s.cardTop}>
+        <Text style={s.siteName} numberOfLines={1}>
+          {item.site_name || 'Site'}
+        </Text>
+        <View style={[s.dot, { backgroundColor: meta.color }]} />
+        <Text style={[s.statusText, { color: meta.color }]}>{meta.label}</Text>
+      </View>
+
+      <View style={s.metaRow}>
+        <CalendarDays size={11} color={palette.mutedLight} />
+        <Text style={s.metaText}>
+          {formatDateOnly(item.scheduled_date)}
+          {item.team_lead_name ? ` · ${item.team_lead_name}` : ''}
+        </Text>
+      </View>
+
+      {pending ? (
+        <View style={s.pendingChip}>
+          <Text style={s.pendingChipText}>Pending approval</Text>
+        </View>
+      ) : null}
+    </TouchableOpacity>
+  );
+});
+
+const PAGE = 30;
+
 function ClientJobsList() {
   const { accent } = useAccent();
   const { selectedClient, setSelectedClientId } = useStaffScope();
+  const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
+  const [visible, setVisible] = useState(PAGE);
   const [refreshing, setRefreshing] = useState(false);
   const [openJob, setOpenJob] = useState<StaffJob | null>(null);
   // long-press pop-up: the visit it was opened for, and the one being sent to a chat
@@ -256,7 +302,34 @@ function ClientJobsList() {
     clientId: selectedClient?.client_id ?? null,
     search,
   });
-  const jobs = useMemo(() => data?.jobs ?? [], [data]);
+  // The search box fires a server request per keystroke otherwise; wait for a short pause in typing.
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(query), 400);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  const allJobs = useMemo(() => data?.jobs ?? [], [data]);
+  const [statusFilter, setStatusFilter] = useState<StatusFilterKey>('all');
+  const counts = useMemo(() => {
+    const c: Partial<Record<StatusFilterKey, number>> = { all: allJobs.length };
+    (['scheduled', 'ongoing', 'completed', 'cancelled'] as StatusFilterKey[]).forEach((k) => {
+      c[k] = allJobs.filter((j) => matchesStatusFilter(j.status, k)).length;
+    });
+    return c;
+  }, [allJobs]);
+  const jobs = useMemo(
+    () => (statusFilter === 'all' ? allJobs : allJobs.filter((j) => matchesStatusFilter(j.status, statusFilter))),
+    [allJobs, statusFilter],
+  );
+  // Render a page at a time (the rows carry big payloads); more load as the list is scrolled.
+  useEffect(() => setVisible(PAGE), [statusFilter, search, selectedClient?.client_id]);
+  const shown = useMemo(() => jobs.slice(0, visible), [jobs, visible]);
+  const onOpenJob = useCallback((j: StaffJob) => setOpenJob(j), []);
+  const onMenuJob = useCallback((j: StaffJob) => setMenuJob(j), []);
+  const renderJob = useCallback(
+    ({ item }: { item: StaffJob }) => <JobRow item={item} onOpen={onOpenJob} onMenu={onMenuJob} />,
+    [onOpenJob, onMenuJob],
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -266,7 +339,7 @@ function ClientJobsList() {
 
   const goBack = () => setSelectedClientId(null);
 
-  if (loading && jobs.length === 0) {
+  if (loading && allJobs.length === 0) {
     return (
       <View style={[s.screen, s.centre]}>
         <ActivityIndicator size="large" color={accent} />
@@ -285,15 +358,19 @@ function ClientJobsList() {
       <View style={s.searchWrap}>
         <Search size={16} color={palette.mutedLight} />
         <TextInput
-          value={search}
-          onChangeText={setSearch}
+          value={query}
+          onChangeText={setQuery}
           placeholder="Search site or address…"
           placeholderTextColor={palette.mutedLight}
           style={s.searchInput}
         />
       </View>
 
-      {error && jobs.length === 0 ? (
+      <View style={{ marginHorizontal: 16, marginTop: 6 }}>
+        <StatusFilterBar value={statusFilter} onChange={setStatusFilter} counts={counts} />
+      </View>
+
+      {error && allJobs.length === 0 ? (
         <View style={s.centre}>
           <CircleAlert size={22} color={palette.danger} />
           <Text style={s.emptyTitle}>Could not load jobs</Text>
@@ -305,45 +382,19 @@ function ClientJobsList() {
           maxToRenderPerBatch={6}
           windowSize={7}
           removeClippedSubviews
-          data={jobs}
+          data={shown}
           keyExtractor={(item) => String(item.schedule_id)}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accent} />}
-          renderItem={({ item }) => {
-            const meta = statusMeta(item.status);
-            const pending = isPendingApproval(item);
-            return (
-              <TouchableOpacity style={s.card} activeOpacity={0.85} onPress={() => setOpenJob(item)} onLongPress={() => setMenuJob(item)} delayLongPress={350}>
-                <View style={s.cardTop}>
-                  <Text style={s.siteName} numberOfLines={1}>
-                    {item.site_name || 'Site'}
-                  </Text>
-                  <View style={[s.dot, { backgroundColor: meta.color }]} />
-                  <Text style={[s.statusText, { color: meta.color }]}>{meta.label}</Text>
-                </View>
-
-                <View style={s.metaRow}>
-                  <CalendarDays size={11} color={palette.mutedLight} />
-                  <Text style={s.metaText}>
-                    {formatDateOnly(item.scheduled_date)}
-                    {item.team_lead_name ? ` · ${item.team_lead_name}` : ''}
-                  </Text>
-                </View>
-
-                {pending ? (
-                  <View style={s.pendingChip}>
-                    <Text style={s.pendingChipText}>Pending approval</Text>
-                  </View>
-                ) : null}
-              </TouchableOpacity>
-            );
-          }}
+          onEndReachedThreshold={0.6}
+          onEndReached={() => setVisible((v) => (v < jobs.length ? v + PAGE : v))}
+          renderItem={renderJob}
           ListEmptyComponent={
             <View style={s.emptyCard}>
               <Wrench size={22} color={palette.mutedLight} />
               <Text style={s.emptyTitle}>No jobs found</Text>
-              <Text style={s.emptyBody}>{search ? 'Try a different search.' : 'Visits will show up here.'}</Text>
+              <Text style={s.emptyBody}>{search ? 'Try a different search.' : statusFilter !== 'all' ? 'No visits with this status.' : 'Visits will show up here.'}</Text>
             </View>
           }
         />
@@ -578,6 +629,17 @@ function JobDetailSheet({ job, onClose }: { job: StaffJob; onClose: () => void }
               </Text>
             </View>
             <ScreenshotButton onPress={shot.take} busy={shot.busy} color={accent} />
+            <TouchableOpacity
+              onPress={() => {
+                onClose();
+                appRouter.push('/staff/chats?section=site' as never);
+              }}
+              hitSlop={10}
+              style={detail.close}
+              accessibilityLabel="Open the visit chat with the supervisor"
+            >
+              <MessageSquare size={18} color={accent} />
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => setSharing(true)} hitSlop={10} style={detail.close} accessibilityLabel="Send visit to chat">
               <MessageSquarePlus size={18} color={accent} />
             </TouchableOpacity>

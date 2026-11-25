@@ -20,7 +20,7 @@
 import React from 'react';
 import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ChevronLeft, CircleAlert } from 'lucide-react-native';
+import { CircleAlert, MessageSquare } from 'lucide-react-native';
 import { styles, palette } from '../../src/theme';
 import { useAccent } from '../../src/theme-context';
 import { useJobDetail, useSldWalkthrough, sldHasWalk } from '../../src/hooks';
@@ -46,7 +46,21 @@ export default function JobDetailScreen() {
       <PageHeader
         title="Visit details"
         onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
-        right={job ? <ScreenshotButton onPress={shot.take} busy={shot.busy} /> : undefined}
+        right={
+          job ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <TouchableOpacity
+                onPress={() => router.push('/support' as never)}
+                hitSlop={8}
+                accessibilityLabel="Chat with the site supervisor"
+                style={{ padding: 6 }}
+              >
+                <MessageSquare size={22} color="#fff" />
+              </TouchableOpacity>
+              <ScreenshotButton onPress={shot.take} busy={shot.busy} />
+            </View>
+          ) : undefined
+        }
       />
 
       {loading && !data ? (

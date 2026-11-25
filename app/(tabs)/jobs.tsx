@@ -53,7 +53,7 @@
 // Visual language matches the rest of the app: light wash background,
 // ambient colour blobs, white shadowed cards.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -65,16 +65,17 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, useNavigation } from 'expo-router';
-import { ArrowRight, CheckCircle2, CircleAlert, Filter, Inbox, Search, X } from 'lucide-react-native';
+import { ArrowRight, CheckCircle2, CircleAlert, Inbox, Search, X } from 'lucide-react-native';
 import { palette } from '../../src/theme';
 import { tc, soft } from '../../src/themeEngine';
 import { useAccent } from '../../src/theme-context';
 import { useSiteContext } from '../../src/site-context';
-import { useJobs, formatDateOnly } from '../../src/hooks';
+import { useJobs, formatDateOnly, matchesStatusFilter, StatusFilterKey } from '../../src/hooks';
 import { JobScope } from '../../src/api/types';
 import { SiteSwitcher } from '../../src/components/SiteSwitcher';
 import { JobCard } from '../../src/components/JobCard';
 import PageHeader from '../../src/components/PageHeader';
+import { StatusFilterBar } from '../../src/components/StatusFilterBar';
 
 const GREEN = '#10b981';
 
@@ -84,9 +85,21 @@ const SCOPES: { key: JobScope; label: string }[] = [
   { key: 'all', label: 'All' },
 ];
 
-const STATUS_LABELS: Record<string, string> = {
-  in_progress: 'In progress',
+const STATUS_LABELS: Record<StatusFilterKey, string> = {
+  all: 'All',
+  scheduled: 'Scheduled',
+  ongoing: 'Ongoing',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
 };
+
+/** Deep links (Overview tiles) may send the raw status, e.g. `in_progress` - map it onto a chip. */
+function toFilterKey(raw?: string | null): StatusFilterKey {
+  const v = String(raw || '').toLowerCase();
+  if (v === 'in_progress' || v === 'ongoing') return 'ongoing';
+  if (v === 'scheduled' || v === 'completed' || v === 'cancelled') return v;
+  return 'all';
+}
 
 /** Reads the Y/M/D digits straight out of the date string and builds a
  * LOCAL Date from those numbers — deliberately bypasses `new Date(iso)`,
@@ -103,6 +116,15 @@ function visitDayLabel(raw: string | null | undefined): string {
   return dt.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+/** One visit row. Memoised so a chip change / refresh only re-renders rows whose job actually changed. */
+const VisitRow = React.memo(function VisitRow({ job, showSite }: { job: any; showSite: boolean }) {
+  return (
+    <View style={s.cardWrap}>
+      <JobCard job={job} showSite={showSite} />
+    </View>
+  );
+});
+
 export default function JobsScreen() {
   const router = useRouter();
   const { accent } = useAccent();
@@ -110,7 +132,7 @@ export default function JobsScreen() {
   const params = useLocalSearchParams<{ scope?: string; status?: string }>();
 
   const [scope, setScope] = useState<JobScope>((params.scope as JobScope) || 'past');
-  const [statusFilter, setStatusFilter] = useState<string | null>(params.status ?? null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilterKey>(toFilterKey(params.status));
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
 
@@ -119,7 +141,7 @@ export default function JobsScreen() {
   // to them rather than only reading them once on first mount.
   useEffect(() => {
     if (params.scope) setScope(params.scope as JobScope);
-    setStatusFilter(params.status ?? null);
+    setStatusFilter(toFilterKey(params.status));
   }, [params.scope, params.status]);
 
   const { data, loading, error, refreshing, refresh } = useJobs({
@@ -142,8 +164,13 @@ export default function JobsScreen() {
   // since that package isn't reliably resolvable as a direct dependency
   // here (same issue as the tab bar's types earlier).
   const navigation = useNavigation();
+  const lastFetchRef = useRef(Date.now());
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
+      // Throttled: the first focus fires right after mount (already fetching) and quick tab hops
+      // do not need two more requests each time.
+      if (Date.now() - lastFetchRef.current < 30_000) return;
+      lastFetchRef.current = Date.now();
       refresh();
       last.refresh();
     });
@@ -151,10 +178,37 @@ export default function JobsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigation, scope, selectedSiteId, search]);
 
+  const showSite = !selectedSite;
+  const renderRow = useCallback(
+    ({ item }: { item: any }) => <VisitRow job={item} showSite={showSite} />,
+    [showSite],
+  );
+
   const jobs = useMemo(() => {
     const base = data?.jobs ?? [];
-    return statusFilter ? base.filter((j) => j.status === statusFilter) : base;
+    return statusFilter === 'all' ? base : base.filter((j) => matchesStatusFilter(j.status, statusFilter));
   }, [data, statusFilter]);
+
+  // Counts shown on the chips (of the visits currently loaded for the chosen scope/site/search).
+  const counts = useMemo(() => {
+    const base = data?.jobs ?? [];
+    const c: Partial<Record<StatusFilterKey, number>> = { all: base.length };
+    (['scheduled', 'ongoing', 'completed', 'cancelled'] as StatusFilterKey[]).forEach((k) => {
+      c[k] = base.filter((j) => matchesStatusFilter(j.status, k)).length;
+    });
+    return c;
+  }, [data]);
+
+  // A status chip filters the rows already loaded, so it needs the full list: switch off the
+  // Completed-only / Upcoming-only server scope when a specific status is chosen.
+  const selectStatus = (key: StatusFilterKey) => {
+    setStatusFilter(key);
+    // Completed uses the server's 'past' scope (smaller, correctly ordered page); Scheduled / Ongoing /
+    // Cancelled need the full list.
+    if (key === 'completed') setScope('past');
+    else if (key !== 'all' && scope !== 'all') setScope('all');
+    router.setParams({ status: key === 'all' ? '' : key });
+  };
 
   // Search is applied on submit, not per keystroke: it goes to the server as an
   // ILIKE across three columns and firing that on every character is wasteful.
@@ -170,7 +224,7 @@ export default function JobsScreen() {
 
   const selectScope = (key: JobScope) => {
     setScope(key);
-    setStatusFilter(null);
+    setStatusFilter('all');
     router.setParams({ scope: key, status: '' });
   };
 
@@ -198,11 +252,7 @@ export default function JobsScreen() {
           data={jobs}
           keyExtractor={(j) => String(j.schedule_id)}
           style={{ flex: 1 }}
-          renderItem={({ item }) => (
-            <View style={s.cardWrap}>
-              <JobCard job={item} showSite={!selectedSite} />
-            </View>
-          )}
+          renderItem={renderRow}
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={accent} />}
@@ -276,28 +326,19 @@ export default function JobsScreen() {
                 })}
               </View>
 
-              {/* Deep-linked status filter, e.g. from the Overview "Active"
-                  tile — shown as a clearable chip so it's never an invisible
-                  narrowing of the list underneath the scope tabs. */}
-              {statusFilter ? (
-                <TouchableOpacity
-                  onPress={() => {
-                    setStatusFilter(null);
-                    router.setParams({ status: '' });
-                  }}
-                  activeOpacity={0.8}
-                  style={[s.filterChip, { borderColor: `${accent}44`, backgroundColor: `${accent}12` }]}
-                >
-                  <Filter size={12} color={accent} />
-                  <Text style={[s.filterChipText, { color: accent }]}>
-                    {STATUS_LABELS[statusFilter] ?? statusFilter}
-                  </Text>
-                  <X size={13} color={accent} />
-                </TouchableOpacity>
-              ) : null}
+              {/* Status chips (Scheduled / Ongoing / Completed ...) */}
+              <View style={{ marginTop: 12 }}>
+                <StatusFilterBar value={statusFilter} onChange={selectStatus} counts={counts} />
+              </View>
 
               <Text style={[s.sectionTitle, { marginBottom: 4 }]}>
-                {scope === 'past' ? 'COMPLETED VISITS' : scope === 'upcoming' ? 'UPCOMING VISITS' : 'ALL VISITS'}
+                {statusFilter !== 'all'
+                  ? `${STATUS_LABELS[statusFilter].toUpperCase()} VISITS`
+                  : scope === 'past'
+                    ? 'COMPLETED VISITS'
+                    : scope === 'upcoming'
+                      ? 'UPCOMING VISITS'
+                      : 'ALL VISITS'}
               </Text>
             </View>
           }
@@ -313,8 +354,8 @@ export default function JobsScreen() {
                 {error ||
                   (search
                     ? `No visits match "${search}".`
-                    : statusFilter
-                      ? `No ${(STATUS_LABELS[statusFilter] ?? statusFilter).toLowerCase()} visits right now.`
+                    : statusFilter !== 'all'
+                      ? `No ${STATUS_LABELS[statusFilter].toLowerCase()} visits right now.`
                       : scope === 'upcoming'
                         ? 'No upcoming visits are booked.'
                         : scope === 'past'

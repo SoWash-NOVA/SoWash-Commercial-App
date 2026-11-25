@@ -5,12 +5,14 @@
 // ZoomableImage). Opened by tapping a photo bubble; swipe left/right for the other photos in the
 // conversation.
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { FlatList, Modal, StatusBar, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, Send, Share2 } from 'lucide-react-native';
+import { Image } from 'expo-image';
 import ZoomableImage from './ZoomableImage';
+import { thumbUrl } from '../api/client';
 import { formatDateTime } from '../hooks';
 
 export interface ViewerPhoto {
@@ -44,6 +46,15 @@ export default function PhotoViewerModal({
   const listRef = useRef<FlatList<ViewerPhoto>>(null);
   const current = photos[index];
   const viewportHeight = height - insets.top - insets.bottom - 70;
+
+  // Warm the cache for the photos either side of the one on screen so a swipe shows them at once.
+  useEffect(() => {
+    const urls = [index - 1, index + 1, index + 2]
+      .map((i) => photos[i]?.url)
+      .filter((u): u is string => !!u)
+      .map((u) => thumbUrl(u, width));
+    if (urls.length) Image.prefetch(urls, 'memory-disk').catch(() => {});
+  }, [index, photos, width]);
 
   return (
     <Modal visible animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -85,6 +96,8 @@ export default function PhotoViewerModal({
           scrollEnabled={pagingEnabled}
           initialScrollIndex={initialIndex}
           getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
+          initialNumToRender={1}
+          windowSize={3}
           keyExtractor={(p) => String(p.id)}
           onScrollToIndexFailed={() => {}}
           showsHorizontalScrollIndicator={false}

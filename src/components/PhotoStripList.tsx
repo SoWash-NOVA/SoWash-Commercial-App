@@ -31,6 +31,7 @@ import {
   Alert,
   FlatList,
   InteractionManager,
+  useWindowDimensions,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -142,6 +143,7 @@ export function PhotoStripList({
   sendable?: boolean;
 }) {
   const { accent } = useAccent();
+  const { width: screenW } = useWindowDimensions();
   const [sendUrl, setSendUrl] = useState<string | null>(null);
   const step = width + gap;
   // Tap a tile -> full-screen viewer with pinch / double-tap zoom, swiping through this row's photos.
@@ -169,7 +171,7 @@ export function PhotoStripList({
       getItemLayout={(_, index) => ({ length: step, offset: step * index, index })}
       renderItem={({ item, index }) => (
         <View style={{ width: step }}>
-          <TouchableOpacity activeOpacity={0.9} onPress={() => setViewerIndex(index)} onLongPress={sendable ? () => setSendUrl(item) : undefined} delayLongPress={350} accessibilityLabel={`Open ${title} photo ${index + 1}`}>
+          <TouchableOpacity activeOpacity={0.9} onPressIn={() => { Image.prefetch(thumbUrl(item, screenW), 'memory-disk').catch(() => {}); }} onPress={() => setViewerIndex(index)} onLongPress={sendable ? () => setSendUrl(item) : undefined} delayLongPress={350} accessibilityLabel={`Open ${title} photo ${index + 1}`}>
             <PhotoThumb url={item} width={width} height={height} radius={radius} priority={index < 2 ? 'high' : 'low'} />
           </TouchableOpacity>
         </View>

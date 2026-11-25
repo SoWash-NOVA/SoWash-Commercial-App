@@ -34,7 +34,7 @@ import { palette } from '../../src/theme';
 import { HEADER_GRADIENT } from '../../src/brand';
 import { SiteProvider } from '../../src/site-context';
 import { JobActionsHost } from '../../src/components/JobActions';
-import { useChatUnread, prefetchClientChat } from '../../src/hooks';
+import { useChatUnread, useJobChatUnread, prefetchClientChat } from '../../src/hooks';
 import { useChatOpen } from '../../src/chat-focus';
 import { startTeamSocket, stopTeamSocket } from '../../src/teamChatSocket';
 
@@ -209,7 +209,9 @@ function CustomTabBar({
   // Brand blue (src/brand.ts), not the user-selectable accent: the bar matches the page headers —
   // the selected item and the centre button wear the header gradient.
   const accent = TAB_ACTIVE;
-  const { unread } = useChatUnread();
+  const { unread: supportUnread } = useChatUnread();
+  const { unread: visitUnread } = useJobChatUnread();
+  const unread = (supportUnread ?? 0) + visitUnread;
   const insets = useSafeAreaInsets();
   const chatOpen = useChatOpen();
 

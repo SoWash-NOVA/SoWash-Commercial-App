@@ -28,6 +28,7 @@ import {
   KeyRound,
   LogOut,
   Mail,
+  MessageSquare,
   Phone,
   ShieldCheck,
   Sun,
@@ -219,6 +220,11 @@ export default function ProfileScreen() {
               onPress={() => router.push('/generation' as never)}
             />
           ) : null}
+          <LinkRow
+            icon={<MessageSquare size={16} color={palette.muted} />}
+            label="Site Team Chat (supervisor)"
+            onPress={() => router.push('/support' as never)}
+          />
           <LinkRow
             icon={<Wrench size={16} color={palette.muted} />}
             label="Maintenance history"

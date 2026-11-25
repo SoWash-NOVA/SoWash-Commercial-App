@@ -362,6 +362,25 @@ export const isCancelled = (s: string | null | undefined) => norm(s).startsWith(
 export const isInProgress = (s: string | null | undefined) =>
   ['started', 'before_photos', 'after_photos', 'in_progress'].includes(norm(s));
 
+export type StatusFilterKey = 'all' | 'scheduled' | 'ongoing' | 'completed' | 'cancelled';
+export const STATUS_FILTERS: { key: StatusFilterKey; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'scheduled', label: 'Scheduled' },
+  { key: 'ongoing', label: 'Ongoing' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'cancelled', label: 'Cancelled' },
+];
+/** Does a visit's free-text status belong to this filter chip? */
+export function matchesStatusFilter(status: string | null | undefined, key: StatusFilterKey): boolean {
+  switch (key) {
+    case 'scheduled': return isScheduled(status);
+    case 'ongoing': return isInProgress(status);
+    case 'completed': return isCompleted(status);
+    case 'cancelled': return isCancelled(status);
+    default: return true;
+  }
+}
+
 export interface StatusMeta {
   label: string;
   color: string;
@@ -551,6 +570,11 @@ export function notificationTarget(n: {
   // A chat reply opens the conversation, not a visit. There is one thread per
   // account, so the thread id is not needed in the route.
   if (n.type === 'chat_reply') return '/support';
+  // Visit chat (supervisor <-> client <-> office): open that visit's room.
+  if (n.type === 'job_chat') return n.schedule_id ? `/job-chat/${n.schedule_id}` : '/job-chat';
+  // General (site) chat: a client lands in Support (its chat row), office staff in Chats -> Site Chat.
+  if (n.type === 'general_chat') return '/support';
+  if (n.type === 'general_chat_staff') return '/staff/chats?section=site';
   // Phone Book restore requests / approvals / rejections open the Phone Book.
   if (typeof n.type === 'string' && n.type.startsWith('phonebook_')) return '/phonebook';
   // Staff pushes about a support conversation (assigned / due soon / overdue) open the Chats tab.
@@ -2620,4 +2644,43 @@ export async function shareGenerationHtml(html: string, title: string): Promise<
   file.create();
   file.write(html);
   await Sharing.shareAsync(file.uri, { mimeType: 'text/html', UTI: 'public.html', dialogTitle: title });
+}
+
+// ─────────────────────────── Job Chat (visit chats) unread ───────────────────────────
+//
+// Unread visit-chat messages for me (client: my company's visits; staff: every visit; supervisor rooms are FO-app only).
+// Drives the Support / Chats tab badges and the "Visits" switch, exactly like useChatUnread above. Refreshes on a push,
+// on app resume, on the shared unread bus (subscribeUnread) and every CHAT_UNREAD_POLL_MS.
+export function useJobChatUnread() {
+  const [unread, setUnread] = useState(0);
+
+  const refresh = useCallback(async () => {
+    try {
+      // The general chat (one chat, site tagged per message). Old per-visit rooms are no longer in the UI.
+      const { data } = await api.get<{ unread?: number }>('customer-portal/general-chat/unread');
+      setUnread(data?.unread ?? 0);
+    } catch {
+      // Leave the previous count in place.
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const timer = setInterval(() => {
+      if (AppState.currentState === 'active') refresh();
+    }, CHAT_UNREAD_POLL_MS);
+    const appStateSub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') refresh();
+    });
+    const offPush = subscribePush(refresh);
+    const offUnread = subscribeUnread(refresh);
+    return () => {
+      clearInterval(timer);
+      appStateSub.remove();
+      offPush();
+      offUnread();
+    };
+  }, [refresh]);
+
+  return { unread, refresh };
 }

@@ -6,7 +6,7 @@ Keep it updated as the code changes — it will go stale otherwise.
 **Size rule:** keep this file well under 150k characters (it is loaded into every session). The history of
 completed work lives in **`docs/CHANGELOG.md`** (newest first, ~200k chars) — append new entries THERE, not here,
 and read it on demand (grep it by topic) rather than in full. Only update §10 "Current state" here.
-**Last full update: 2026-11-02** (changelog split out; §1–§5, §7–§9 last refreshed 2026-10-07; §2, §4 (generation row), §6 and §10 refreshed for the Generation & PR work).
+**Last full update: 2026-11-24** (§10 + §2/§6 notes for the status filter, attendance-time fix and photo-viewer speed-ups; older sections as before) (changelog split out; §1–§5, §7–§9 last refreshed 2026-10-07; §2, §4 (generation row), §6 and §10 refreshed for the Generation & PR work).
 
 ---
 ## 1. What this app is
@@ -264,6 +264,10 @@ residential app probably wants it too.
   copy), run migrations BEFORE uploading routes that select the new columns, never upload the local
   `package-lock.json`, then `pm2 restart` and check `pm2 logs`. Deploys are manual; "done" in the changelog means
   "in the working tree" unless it says deployed.
+- **Job Chat (2026-11-18, in the working tree):** a separate per-VISIT room (supervisor of the FO app ↔ the visit's client ↔ office), NOT
+  the support thread. `src/components/JobChatRoom.tsx` + `app/job-chat/*`; API `/customer-portal/job-chat/*` (`sowash-backend/routes/jobChatRoutes.js`,
+  design + deploy order in `sowash-backend/docs/job-chat.md`). `'job-chat'` is in `SHARED_STACK_SEGMENTS`. Push type `job_chat` →
+  `/job-chat/<schedule_id>`. Server decides access per visit (client of the visit / STAFF_ROLES / the visit's team lead).
 - **Live Support chat (2026-10-27):** `services/staffChatSocket.js` (backend, same `/ws/staff-chat` endpoint as Team chat) has
   `notifySupportChat({clientId, threadId, event})` — SIGNAL ONLY (`support_changed`; apps re-fetch over REST). A `kind:'portal'`
   token may connect as a LISTEN-ONLY client socket (client_id read from the DB). Called from `routes/commercialChatRoutes.js` and
@@ -505,6 +509,25 @@ about the backend checkout being stale):
 
 ## 10. Current state and changelog
 
+- **2026-11-24 (all JS-only, typecheck clean, NOT seen on a device; details in `docs/CHANGELOG.md`):**
+  - **Status filter chips** (All / Scheduled / Ongoing / Completed / Cancelled, with counts) on the client Visits tab (`app/(tabs)/jobs.tsx`) and the
+    staff Jobs list (`app/staff/jobs.tsx`). Shared `src/components/StatusFilterBar.tsx`; `STATUS_FILTERS` / `matchesStatusFilter()` in `src/hooks.ts`
+    (uses `isScheduled/isInProgress/isCompleted/isCancelled`). Client: Completed chip -> server `past` scope, other chips -> `all`; Overview deep link
+    `status=in_progress` maps to Ongoing. Filtering is on the rows already loaded (client page = 100).
+  - **Job-list speed:** rows memoised; client focus-refetch throttled to 30 s; staff search debounced 400 ms; staff list renders 30 rows at a time
+    (`PAGE`). Still heavy: `/schedule/history` returns every row of a client with full detail (photos, FSR, attendance) - a light list + detail
+    fetch + pagination would need a backend change (not done).
+  - **Photo viewer speed:** `ZoomableImage` opens on the cached tile thumbnail, loads a screen-sized `?w=` copy (`thumbUrl(uri, width)`), and fetches
+    the original only when zoomed; `PhotoViewerModal` prefetches neighbours; `PhotoStripList` prefetches on press-in. Needs the backend
+    `middleware/uploadThumbs.js` (sharp) - without it the original is served.
+  - **Attendance times 1 h off vs web - BACKEND fix, NOT DEPLOYED:** `attendance.clock_in_at/clock_out_at` are `timestamp WITHOUT time zone` written in
+    the Node server's local time (VPS zone is not UTC; it looks DST-observing, +2 summer / +1 winter). The staff `/schedule/history` `json_agg` sent them
+    as zone-less digits, so no client could be right. `sowash-backend/routes/schedulingRoutes.js` now loads attendance in a second query and replaces
+    `row.attendance` (proper ISO instants). TO DO: upload that file to the VPS (compare with the live copy first), `pm2 restart all`, check a visit
+    against the web. `customerJobHistoryRoutes.js` has the same json_agg but the client UI hides attendance times. Safer long-term: pin `process.env.TZ`
+    or move the columns to `timestamptz`.
+  - **Job Chat (2026-11-18) is still uncommitted** in the working tree (`app/job-chat/*`, `JobChatRoom`, `JobChatSection`, `GeneralChat` + edits);
+    its backend (`jobChatRoutes.js`) deploy was not verified.
 - **2026-11-07:** visit-report screenshot button (`src/screenshot.tsx`, client visit screen + staff visit sheet) uses `react-native-view-shot` -> needs a new EAS build; Team chat gallery picks several pictures at once (`pickChatPhotos`). Details in `docs/CHANGELOG.md`.
 - **Staff Phone Book consent (Google Play User Data policy, 2026-11-02):** contacts are personal data that the Phone Book UPLOADS, so `src/phonebook.ts` never reads them (or even asks Android for the permission) until the staff user tapped 'Agree' on the in-app disclosure (`src/phonebookConsent.tsx`, shown by `app/staff/_layout.tsx` when the staff app opens; versioned per-user choice in SecureStore). Back/home/tap-away is not consent. Changing the disclosure wording materially = bump `DISCLOSURE_VERSION`. Privacy policy (app + docs html) and the Play Data safety / Contacts declaration must keep saying the same. 1.0.2 was rejected for the missing disclosure; 1.0.3 is the compliant version.
 - **2026-11-02 snapshot:** Generation & PR is feature-complete and LIVE on the server: all SQL (EPC, reports, inverters, curves, pictures, iNovaa Ai bot + alerts,

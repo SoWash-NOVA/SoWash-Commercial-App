@@ -68,6 +68,7 @@ import {
   MapPin,
   Mic,
   Video,
+  MessageSquare,
   MessagesSquare,
   Reply,
   Search,
@@ -81,7 +82,9 @@ import { isDark, tc, ttc, soft } from '../../src/themeEngine';
 import { useAccent } from '../../src/theme-context';
 import { useSiteContext } from '../../src/site-context';
 import { photoUrl } from '../../src/api/client';
-import { useChat, useJobs, useSiteRings, formatDateOnly, formatTime, ChatPhotoInput } from '../../src/hooks';
+import { useChat, useJobs, useSiteRings, useJobChatUnread, formatDateOnly, formatTime, ChatPhotoInput } from '../../src/hooks';
+import GeneralChat from '../../src/components/GeneralChat';
+import { JobChatBackBar } from '../../src/components/JobChatSection';
 import { useAuth } from '../../src/auth/AuthContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import ChatBackground from '../../src/components/ChatBackground';
@@ -198,7 +201,7 @@ function buildRows(messages: ChatMessage[]): Row[] {
  * ==================================================================== */
 
 export default function SupportScreen() {
-  const [activeSite, setActiveSite] = useState<SiteLike | 'general' | null>(null);
+  const [activeSite, setActiveSite] = useState<SiteLike | 'general' | 'visits' | null>(null);
   // "Attach in chat" from a long-pressed visit (src/chat-attach.ts): open General with it tagged.
   const attachSeq = useChatAttachRequest();
   const [attachJob, setAttachJob] = useState<JobSummary | null>(null);
@@ -226,6 +229,14 @@ export default function SupportScreen() {
       />
     );
   }
+  if (activeSite === 'visits') {
+    return (
+      <GeneralChat
+        mode="client"
+        header={<JobChatBackBar title="Site Team Chat" subtitle="Site supervisor, you and SoWash office" onBack={() => setActiveSite(null)} />}
+      />
+    );
+  }
   if (activeSite) {
     return (
       <SiteRings
@@ -243,7 +254,8 @@ export default function SupportScreen() {
  * List of sites
  * ==================================================================== */
 
-function SiteList({ onOpen }: { onOpen: (site: SiteLike | 'general') => void }) {
+function SiteList({ onOpen }: { onOpen: (site: SiteLike | 'general' | 'visits') => void }) {
+  const { unread: visitUnread } = useJobChatUnread();
   // See the ASSUMPTION note at the top of the file. Cast goes through
   // `unknown` first — the real SiteContextValue and this narrowed shape
   // don't overlap enough for TS to allow a direct cast.
@@ -271,6 +283,24 @@ function SiteList({ onOpen }: { onOpen: (site: SiteLike | 'general') => void }) 
         contentContainerStyle={s.siteList}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
+          <>
+          <TouchableOpacity style={s.siteRow} activeOpacity={0.85} onPress={() => onOpen('visits')}>
+            <View style={[s.siteAvatar, { backgroundColor: '#0f766e' }]}>
+              <MessageSquare size={18} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.siteName}>Site Team Chat</Text>
+              <Text style={s.siteSub} numberOfLines={1}>
+                Talk to the site supervisor — pick a site, share an FSR, tag people
+              </Text>
+            </View>
+            {visitUnread > 0 ? (
+              <View style={{ minWidth: 22, height: 22, borderRadius: 11, backgroundColor: '#ef4444', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, marginRight: 6 }}>
+                <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>{visitUnread > 99 ? '99+' : visitUnread}</Text>
+              </View>
+            ) : null}
+            <ChevronRight size={18} color={palette.mutedLight} />
+          </TouchableOpacity>
           <TouchableOpacity style={s.siteRow} activeOpacity={0.85} onPress={() => onOpen('general')}>
             <View style={[s.siteAvatar, { backgroundColor: isDark() ? '#2A3649' : '#0f172a' }]}>
               <Users size={18} color="#fff" />
@@ -283,6 +313,7 @@ function SiteList({ onOpen }: { onOpen: (site: SiteLike | 'general') => void }) 
             </View>
             <ChevronRight size={18} color={palette.mutedLight} />
           </TouchableOpacity>
+          </>
         }
         renderItem={({ item }) => {
           const name = item.site_name || 'Site';
