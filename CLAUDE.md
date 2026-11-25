@@ -526,6 +526,7 @@ about the backend checkout being stale):
     `row.attendance` (proper ISO instants). TO DO: upload that file to the VPS (compare with the live copy first), `pm2 restart all`, check a visit
     against the web. `customerJobHistoryRoutes.js` has the same json_agg but the client UI hides attendance times. Safer long-term: pin `process.env.TZ`
     or move the columns to `timestamptz`.
+  - **SLD pin direction (2026-11-25):** pins have `direction_deg` (set in the web SLD editor); `src/components/SldPinDirection.tsx` draws the camera cone on the walkthrough map (copy also in `sowash-fo-app/components`, used by `app/ci-tasks/sld-map.tsx`). Needs migration `2026-11-25-sld-pin-direction.sql` + uploading `routes/commercial-sld/diagrams.js` and `customerJobHistoryRoutes.js` (compare with live first); FO app needs a new build.
   - **Job Chat (2026-11-18) is still uncommitted** in the working tree (`app/job-chat/*`, `JobChatRoom`, `JobChatSection`, `GeneralChat` + edits);
     its backend (`jobChatRoutes.js`) deploy was not verified.
 - **2026-11-07:** visit-report screenshot button (`src/screenshot.tsx`, client visit screen + staff visit sheet) uses `react-native-view-shot` -> needs a new EAS build; Team chat gallery picks several pictures at once (`pickChatPhotos`). Details in `docs/CHANGELOG.md`.

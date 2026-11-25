@@ -257,6 +257,8 @@ export interface SldPoint {
   x_percent: number | string | null;
   y_percent: number | string | null;
   order_index: number | null;
+  /** Which way the photo at this pin should face: degrees on the diagram, 0 = up, clockwise. null = any direction. */
+  direction_deg?: number | string | null;
   /** Latest 'before' photo at this pin for this schedule, if any. */
   before_url: string | null;
   /** Latest 'after' photo at this pin for this schedule, if any. */

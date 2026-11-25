@@ -43,6 +43,7 @@ import {
 import { ChevronLeft, ChevronRight, Map as MapIcon, X } from 'lucide-react-native';
 import { photoUrl } from '../api/client';
 import { palette, ACCENT_DEFAULT } from '../theme';
+import SldPinDirection, { parseDirection } from './SldPinDirection';
 import { SldDiagram, SldPoint } from '../api/types';
 
 /* ── palette ──────────────────────────────────────────────────────────────
@@ -658,6 +659,7 @@ function Pin({
         justifyContent: 'center',
       }}
     >
+      <SldPinDirection deg={parseDirection(point.direction_deg)} size={96} uid={point.id} />
       {has ? (
         <Animated.View
           style={[
