@@ -3,7 +3,7 @@
     "owner": "sowash-abeer",
     "name": "SoWash Commercial",
     "slug": "sowash-commercial-app",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "sowashcommercial",
@@ -37,6 +37,10 @@
       [
         "expo-build-properties",
         {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          },
           "ios": {
             "useFrameworks": "static"
           }
